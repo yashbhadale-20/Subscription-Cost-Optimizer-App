@@ -1,0 +1,34 @@
+Monthly and annual billing
+A monthly subscription is billed each month. A simple annual estimate is the monthly price multiplied by twelve. This estimate does not include taxes, fees, discounts, or changes during the year.
+
+Comparing listed prices
+When two plans have the same monthly price, the price-only comparison is a tie. The annual price difference and annual savings are zero. Do not claim that either plan is cheaper when the prices are equal.
+
+Discounts and promotions
+A discount reduces the listed price by the specified percentage or amount for the period when the discount applies. For a percentage discount, the discounted monthly price is the listed monthly price multiplied by (1 - discount percentage / 100). For example, a 10% discount on ₹500 gives a discounted monthly price of ₹450 while the discount applies.
+Promotional prices may apply only for a limited period. A fair comparison should record the promotion amount or percentage, how long the promotion lasts, and the price after the promotion ends. Do not assume a temporary promotion lasts for all twelve months. If the promotion duration or later price is unknown, state that the annual estimate is conditional on the supplied price assumptions.
+When comparing two plans, compare the prices on the same basis: either compare both listed prices before discounts, or compare both discounted prices using the discounts and durations supplied by the user. Do not treat a discount as guaranteed beyond its stated duration.
+
+Taxes and fees
+Taxes and service fees can increase the amount paid beyond the advertised subscription price. The basic cost calculator in this prototype does not calculate taxes or extra fees.
+
+Annual billing plans
+An annual-billing plan may charge the full year upfront and may have a different effective monthly rate. Comparing it fairly requires the actual annual charge and any applicable conditions, not only a monthly price.
+
+Renewal price changes
+Some services increase prices at renewal or after an introductory period. A flat annual estimate cannot predict a future price change unless the change and date are supplied.
+
+Usage limits and features
+The cheapest subscription is not necessarily the best value. Plans may have different storage, number of users, streaming quality, usage limits, support, or other features. This prototype compares prices and does not score feature value.
+
+Cancellation and refunds
+Cancellation rules, refund eligibility, and early termination fees can affect the total cost. These terms should be checked in the provider's current policy before making a purchase decision. This policy does not specify one universal refund deadline for every provider.
+
+Currency and billing period
+Prices should be compared in the same currency and for the same billing period. Currency conversion, exchange-rate changes, and bank charges are outside the scope of this prototype.
+
+Privacy and account data
+A cost comparison should not require passwords or payment-card details. This prototype stores only the demo user's chosen plan prices and currency in a local SQLite database.
+
+Limits of retrieved policy
+The RAG system can answer only when relevant information is present in its local corpus. If the corpus does not support a policy claim, the reviewer should say it does not know rather than invent a rule. General-knowledge questions unrelated to subscription policy, such as geography questions, are outside the scope of this policy corpus and should be identified as not answered by the retrieved policy.

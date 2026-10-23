@@ -1,0 +1,11 @@
+Search question: According to the subscription policy, how is annual cost estimated, and what does the estimate exclude?
+Unanswerable-test question: what would be the refund for my subscription cancellation?
+Retrieved context:
+[Chunk 8] Cancellation and refunds
+Cancellation rules, refund eligibility, and early termination fees can affect the total cost. These terms should be checked in the provider's current policy before making a purchase decision.
+
+[Chunk 3] Discounts and promotions
+Promotional prices may apply only for a limited period. A fair comparison should record the promotion duration and the price after the promotion ends. A simple monthly-times-twelve calculation assumes the same price for all twelve months.
+
+[Chunk 4] Taxes and fees
+Taxes and service fees can increase the amount paid beyond the advertised subscription price. The basic cost calculator in this prototype does not calculate taxes or extra fees.

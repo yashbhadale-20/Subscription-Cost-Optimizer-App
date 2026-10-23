@@ -1,0 +1,18 @@
+[GUARDRAIL] Guardrail approved request.
+[SQLITE MEMORY] Recalled profile namespace: {'currency': 'INR', 'last_plan_a_monthly': '211.00', 'last_plan_b_monthly': '214.00'}
+[RAG] Retrieved 3 chunk(s), k=3.
+[SUPERVISOR hop 1/3] Route to Calculator Agent.
+[FAILURE ROUTER] Caught calculator error and continued safely: Calculator failure caught: RuntimeError: Injected demo failure in annual-cost calculator
+[SUPERVISOR hop 2/3] Route to Policy/Review Agent.
+[REVIEW AGENT] Completed.
+[SUPERVISOR hop 3/3] Finalize; hop limit prevents more routing.
+[METRIC] elapsed_seconds=2.436; max_hops=3
+
+FINAL ANSWER
+Annual cost results and comparison:
+Calculator failure caught: RuntimeError: Injected demo failure in annual-cost calculator
+
+Policy review:
+The policy context supports comparing costs in the same currency and for the same billing period. It does not support comparing features or usage limits.
+
+Note: the recommendation compares listed prices only; it does not account for taxes, discounts, usage limits, renewal increases, or cancellation fees.

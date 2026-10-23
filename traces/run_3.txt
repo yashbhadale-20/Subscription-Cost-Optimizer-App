@@ -1,0 +1,5 @@
+Input check: Blocked because the request contains: 'ignore all previous instructions'
+Run time: 0.000 seconds; step limit: 3
+
+RESULT
+I can't run that request because it was stopped by the input check.

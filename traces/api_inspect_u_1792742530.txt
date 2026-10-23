@@ -1,0 +1,32 @@
+Input check: Looks okay.
+Saved profile: {'currency': 'INR', 'last_plan_a_discount': '10.00', 'last_plan_a_monthly': '100.00', 'last_plan_b_discount': '20.00', 'last_plan_b_monthly': '200.00', 'plan_a_name': 'Basic', 'plan_b_name': 'Pro'}
+Policy search: found 3 relevant chunk(s), using k=3.
+Step 1/3: working out the prices.
+Price calculations finished.
+  Used tool: calculate_discounted_price with {'discount_percent': 10, 'monthly_price': 100}
+  Used tool: calculate_discounted_price with {'monthly_price': 200, 'discount_percent': 20}
+  Used tool: calculate_annual_cost with {'monthly_cost': 90}
+  Used tool: calculate_annual_cost with {'monthly_cost': 160}
+  Used tool: compare_plans with {'plan_a_cost': 90, 'plan_b_cost': 160}
+  Result: Original monthly price: ₹100.00; discount: 10.00%; monthly discount amount: ₹10.00; price after discount: ₹90.00
+  Result: Original monthly price: ₹200.00; discount: 20.00%; monthly discount amount: ₹40.00; price after discount: ₹160.00
+  Result: Annual cost: ₹1080.00
+  Result: Annual cost: ₹1920.00
+  Result: Plan A is cheaper. Annual savings: ₹840.00.
+Step 2/3: checking the policy notes.
+Policy check finished.
+Finishing up; the step limit has been reached.
+
+RESULT
+Here is the cost comparison:
+Based on the calculations:
+
+- Plan A, after applying the 10.00% discount, has a monthly price of ₹90.00, resulting in an annual cost of ₹1080.00.
+- Plan B, after applying the 20.00% discount, has a monthly price of ₹160.00, resulting in an annual cost of ₹1920.00.
+
+Therefore, Plan A is cheaper annually, with annual savings of ₹840.00.
+
+What the policy says:
+Plan A is cheaper annually with annual savings of ₹840.00.
+
+The comparison uses the discounts you entered. It does not include any other fees or future price changes unless those are stated in the policy.

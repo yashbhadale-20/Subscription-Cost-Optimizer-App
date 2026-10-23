@@ -1,0 +1,16 @@
+# ── Core AI stack (required by ta2_subscription_optimizer.py) ───────────────
+langchain>=1.0.0
+langchain-ollama
+langgraph
+langgraph-checkpoint-sqlite
+langchain-chroma
+chromadb
+
+# ── FastAPI backend ──────────────────────────────────────────────────────────
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# ── Async SQLite (used by history endpoint) ──────────────────────────────────
+aiosqlite
