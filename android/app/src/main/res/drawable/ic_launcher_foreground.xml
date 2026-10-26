@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Two ascending bars and a downward trend line: "compare and save". Drawn inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M36,48h10a2,2 0,0 1,2 2v22a2,2 0,0 1,-2 2h-10a2,2 0,0 1,-2 -2v-22a2,2 0,0 1,2 -2z" />
+    <path
+        android:fillColor="#FFC5CAE9"
+        android:pathData="M62,38h10a2,2 0,0 1,2 2v32a2,2 0,0 1,-2 2h-10a2,2 0,0 1,-2 -2v-32a2,2 0,0 1,2 -2z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF7EE2A8"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M34,38L48,44L58,34L76,30" />
+</vector>

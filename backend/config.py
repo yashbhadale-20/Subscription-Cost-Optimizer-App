@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     max_policy_k: int = 10                    # max RAG chunks per request
     llm_timeout_seconds: int = 180            # asyncio.wait_for limit
 
+    # ── RAG / memory ─────────────────────────────────────────────────────────
+    # Minimum normalised relevance (0–1) for a chunk to count as evidence. Measured on
+    # this corpus: on-topic questions score 0.45–0.60, unrelated ones 0.15 or less.
+    policy_min_relevance: float = 0.30
+    # Messages replayed from SQLite to rebuild a chat thread the in-memory agent lost
+    # (e.g. after a server restart).
+    chat_restore_messages: int = 20
+
     # ── Paths (derived from PROJECT_ROOT; override only if needed) ───────────
     db_path: Path = PROJECT_ROOT / "subscription_memory.sqlite"
     chroma_dir: Path = PROJECT_ROOT / "chroma_db"

@@ -21,7 +21,7 @@ from pydantic import ValidationError
 from backend.config import settings
 from backend.dependencies import startup_state, shutdown_state
 from backend.models import ErrorResponse
-from backend.routers import health, compare, chat, memory, policy
+from backend.routers import auth, chat, compare, health, history, memory, policy, preferences
 
 # ── logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -74,7 +74,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
@@ -115,6 +115,9 @@ app.include_router(compare.router)
 app.include_router(chat.router)
 app.include_router(memory.router)
 app.include_router(policy.router)
+app.include_router(auth.router)
+app.include_router(history.router)
+app.include_router(preferences.router)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -128,13 +131,26 @@ async def root():
         "version": settings.app_version,
         "docs": "/docs",
         "endpoints": [
-            "GET  /health",
-            "GET  /health/ollama",
-            "POST /compare",
-            "POST /chat",
-            "GET  /memory/{user_id}",
-            "POST /memory/{user_id}",
-            "GET  /memory/{user_id}/history",
-            "GET  /policy/search?q=...&k=3",
+            "GET    /health",
+            "GET    /health/ollama",
+            "POST   /auth/session",
+            "POST   /compare                      (bearer token)",
+            "POST   /chat                         (bearer token)",
+            "GET    /conversations                (bearer token)",
+            "GET    /conversations/{thread_id}    (bearer token)",
+            "DELETE /conversations/{thread_id}    (bearer token)",
+            "GET    /history                      (bearer token)",
+            "GET    /history/{id}                 (bearer token)",
+            "GET    /history/{id}/trace           (bearer token)",
+            "DELETE /history/{id}                 (bearer token)",
+            "DELETE /history                      (bearer token)",
+            "GET    /preferences                  (bearer token)",
+            "PUT    /preferences                  (bearer token)",
+            "GET    /memory/{user_id}             (bearer token)",
+            "POST   /memory/{user_id}             (bearer token)",
+            "GET    /memory/{user_id}/history     (bearer token)",
+            "GET    /policy/search?q=...&k=3",
+            "POST   /policy/ask",
+            "GET    /policy/status",
         ],
     }

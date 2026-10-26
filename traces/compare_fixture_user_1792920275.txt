@@ -1,0 +1,13 @@
+Input guardrail: Looks okay.
+Running deterministic cost calculations...
+Cost calculation complete: Stream Basic ₹2089.50/yr vs Stream Plus Annual ₹1998.96/yr
+Recommendation: tie
+Scores: Stream Basic=17.0, Stream Plus Annual=17.0 (priority: student_budget)
+Policy search: found 3 relevant chunk(s).
+Generating AI explanation grounded in calculations and policy...
+AI explanation generated.
+User profile saved for fixture_user.
+Total elapsed: 13.358s
+
+RESULT
+Both plans have similar scores and feature sets, making them equally valuable. The Stream Plus Annual plan offers a 4.3% discount over the first year, saving ₹90.54. However, the Stream Basic plan is cheaper in the long run, with a recurring annual cost of ₹2388.00 compared to Stream Plus Annual's ₹1998.96. The Stream Plus Annual plan includes 2 screens and 4K quality, which may be a significant advantage for students who need these features. The Stream Basic plan is more cost-effective in the long term, but the Stream Plus Annual plan provides better value for students who require additional features. Trade-offs include the Stream Plus Annual's higher cost and the Stream Basic's limited screen support and 4K quality. Neither plan is clearly superior based on cost alone; the choice depends on additional features and personal needs.

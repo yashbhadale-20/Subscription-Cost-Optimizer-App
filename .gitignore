@@ -16,3 +16,6 @@ __MACOSX/
 # Temporary and local test outputs
 .pytest_cache/
 verify_all.py
+
+# Database backups written before schema migrations
+*.pre-migration-v*.bak

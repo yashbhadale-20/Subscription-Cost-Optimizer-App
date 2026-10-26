@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
+from fastapi import Header, HTTPException
 
 # ── ensure the project root is on the Python path so ta2_subscription_optimizer
 #    can be imported from the backend/ sub-package ───────────────────────────
@@ -29,6 +29,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 import ta2_subscription_optimizer as _app  # noqa: E402  (must come after sys.path)
 
+from backend import db  # noqa: E402
 from backend.config import settings  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,14 @@ async def startup_state() -> None:
         logger.info("SQLite long-term memory initialized.")
     except Exception as exc:
         logger.warning("SQLite init warning: %s", exc)
+
+    # 1b. Backend tables (additive migrations; backs up the file before the first one)
+    report = db.migrate()
+    if report["from_version"] != report["to_version"]:
+        logger.info(
+            "Database migrated v%s -> v%s (backup: %s)",
+            report["from_version"], report["to_version"], report["backup"] or "not needed, database was empty",
+        )
 
     # 2. Initialise vectorstore in a thread (Chroma + local disk; safe without Ollama
     #    because the collection already contains 11 documents)
@@ -119,4 +128,34 @@ async def require_ollama() -> None:
                 "message": msg,
                 "hint": "Start Ollama with 'ollama serve' and ensure models are pulled.",
             },
+        )
+
+
+def current_user(authorization: str | None = Header(default=None)) -> str:
+    """
+    FastAPI dependency: resolves the bearer token from ``POST /auth/session`` to a user ID.
+    Every user-scoped endpoint takes the user ID from here, never from the request alone.
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "Not signed in", "message": "Send 'Authorization: Bearer <token>' from POST /auth/session."},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user_id = db.user_for_token(authorization[7:].strip())
+    if user_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "Invalid session", "message": "This session token is not recognised. Sign in again."},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user_id
+
+
+def ensure_same_user(token_user: str, claimed_user: str) -> None:
+    """403 when a request names a user other than the one its token belongs to."""
+    if token_user != claimed_user:
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "Forbidden", "message": "This session can only access its own user's data."},
         )

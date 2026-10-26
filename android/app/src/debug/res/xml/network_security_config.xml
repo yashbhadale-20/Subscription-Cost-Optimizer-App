@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    DEBUG BUILDS ONLY. Overrides src/main/res/xml/network_security_config.xml.
+
+    The development backend runs over plain HTTP (uvicorn on port 8000), reached from the emulator
+    via 10.0.2.2 or from a phone via the computer's LAN address, which isn't known at build time.
+    Cleartext is therefore allowed for every host in debug builds. Release builds use the main
+    configuration, which permits HTTPS only.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

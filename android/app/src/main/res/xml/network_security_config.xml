@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Production configuration: HTTPS only. Debug builds replace this file with
+    src/debug/res/xml/network_security_config.xml, which allows cleartext for the local backend.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

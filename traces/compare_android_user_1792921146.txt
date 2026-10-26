@@ -1,0 +1,14 @@
+Input guardrail: Looks okay.
+Running deterministic cost calculations...
+Cost calculation complete: Stream Basic ₹2149.20/yr vs Stream Plus Annual ₹1998.96/yr
+Recommendation: plan_b
+Scores: Stream Basic=6.3, Stream Plus Annual=12.4 (priority: student_budget)
+Missing info: No usage limits provided for either plan.; No cancellation terms provided for either plan.
+Policy search: found 3 relevant chunk(s).
+Generating AI explanation grounded in calculations and policy...
+AI explanation generated.
+User profile saved for android_user.
+Total elapsed: 13.617s
+
+RESULT
+Stream Plus Annual is recommended due to its lower first-year cost of ₹1998.96 compared to Stream Basic's ₹2149.20, saving ₹150.24 (7.0%). Stream Plus Annual also scores 6.1 points higher (A: 6.3, B: 12.4) under the 'student_budget' priority. The recommendation is based on the annual savings and feature value, not just the monthly price. Stream Plus Annual offers 4K support, which is only available in this plan. Stream Basic provides HD streaming, which is only available in this plan. Users should consider their streaming needs and budget to make the best choice. The policy context emphasizes that the best value is not always determined by price alone, but also by features and savings.

@@ -187,3 +187,162 @@ python verify_all.py
    - Ollama service is not running. Launch Ollama from the Windows Start menu or run `ollama serve`.
 4. **Missing Source Files / Mac Resource Fork Files (`._*`)**:
    - Files starting with `._` are macOS AppleDouble metadata files created when unzipping Mac archives on Windows. The real source files have been recovered from the project archive and are active in `ta2/`.
+
+---
+
+## 8. FastAPI REST Backend & AI Two-Subscription Comparison Engine
+
+The project features a full Python FastAPI backend exposing REST APIs with deterministic calculation, RAG policy grounding, priority-based scoring, and SQLite persistence.
+
+### Starting the Backend
+```powershell
+uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+```
+Interactive API docs available at: `http://127.0.0.1:8000/docs`
+
+### Key Endpoints:
+- `GET /health` — Service liveness & version
+- `GET /health/ollama` — Ollama daemon & model availability check (`qwen2.5:3b`, `nomic-embed-text`)
+- `POST /compare` — **Enhanced AI-powered two-subscription comparison**
+- `POST /chat` — Conversational multi-turn assistant with `InMemorySaver`
+- `GET /memory/{user_id}` & `POST /memory/{user_id}` — Long-term SQLite profile storage
+- `GET /policy/search?q={query}&k={3}` — ChromaDB semantic policy search
+
+---
+
+### `POST /compare` Specification
+
+#### Request Schema:
+```json
+{
+  "user_id": "student_101",
+  "question": "Which subscription is best for my streaming needs?",
+  "priority": "student_budget",
+  "plan_a": {
+    "name": "Entertainment Lite",
+    "provider": "StreamCo",
+    "monthly_price": 299.0,
+    "billing_cycle": "monthly",
+    "discount": {
+      "percent": 50.0,
+      "intro_months": 3,
+      "post_intro_price": 299.0
+    },
+    "features": ["1080p HD", "2 devices", "Ad-supported"],
+    "usage_limits": { "screens": 2, "downloads": 10 },
+    "cancellation_terms": "Cancel anytime without penalty",
+    "renewal_note": "Reverts to regular price after 3 months"
+  },
+  "plan_b": {
+    "name": "Entertainment Pro Annual",
+    "provider": "StreamCo",
+    "monthly_price": 2400.0,
+    "billing_cycle": "annual",
+    "discount_percent": 10.0,
+    "features": ["4K Ultra HD", "4 devices", "Ad-free", "Offline downloads"],
+    "usage_limits": { "screens": 4, "downloads": 100 },
+    "cancellation_terms": "Annual commitment with prorated refund within 14 days",
+    "renewal_note": "Renews annually at standard rate"
+  }
+}
+```
+
+*Supported Priorities*: `lowest_cost`, `best_value`, `most_features`, `heavy_usage`, `student_budget`, `flexible_cancellation`.  
+*Supported Billing Cycles*: `monthly`, `quarterly`, `semi_annual`, `annual`.
+
+#### Response Schema:
+```json
+{
+  "recommendation": "plan_b",
+  "recommendation_reason": "Entertainment Pro Annual is recommended: it saves ₹979.50 in the first year...",
+  "priority_used": "student_budget",
+  "cost_a": {
+    "plan_name": "Entertainment Lite",
+    "listed_price": 299.0,
+    "billing_cycle": "monthly",
+    "monthly_equivalent": 299.0,
+    "discount_percent": 50.0,
+    "discounted_monthly": 149.5,
+    "first_year_cost": 3139.5,
+    "first_year_explanation": "3 months × ₹149.50 (intro) + 9 months × ₹299.00 (regular) = ₹3139.50",
+    "recurring_annual_cost": 3588.0,
+    "recurring_annual_explanation": "12 months × ₹299.00 (post-intro rate) = ₹3588.00",
+    "has_intro_offer": true,
+    "intro_months": 3,
+    "post_intro_monthly": 299.0,
+    "renewal_cost_note": "Reverts to regular price after 3 months"
+  },
+  "cost_b": {
+    "plan_name": "Entertainment Pro Annual",
+    "listed_price": 2400.0,
+    "billing_cycle": "annual",
+    "monthly_equivalent": 200.0,
+    "discount_percent": 10.0,
+    "discounted_monthly": 180.0,
+    "first_year_cost": 2160.0,
+    "first_year_explanation": "12 months × ₹180.00 = ₹2160.00 (ongoing 10.0% discount)",
+    "recurring_annual_cost": 2160.0,
+    "recurring_annual_explanation": "12 months × ₹180.00 (ongoing 10.0% discount) = ₹2160.00",
+    "has_intro_offer": false
+  },
+  "absolute_savings_first_year": 979.5,
+  "percentage_savings_first_year": 31.2,
+  "absolute_savings_recurring": 1428.0,
+  "percentage_savings_recurring": 39.8,
+  "cheaper_plan_first_year": "Entertainment Pro Annual",
+  "cheaper_plan_recurring": "Entertainment Pro Annual",
+  "feature_comparison": {
+    "only_in_a": ["1080p HD", "2 devices", "Ad-supported"],
+    "only_in_b": ["4K Ultra HD", "4 devices", "Ad-free", "Offline downloads"],
+    "shared": [],
+    "a_count": 3,
+    "b_count": 4
+  },
+  "score_a": {
+    "cost_score": 0.0,
+    "features_score": 42.9,
+    "usage_score": 14.3,
+    "cancellation_score": 70.0,
+    "weighted_total": 16.4,
+    "sufficient_data": true
+  },
+  "score_b": {
+    "cost_score": 31.2,
+    "features_score": 57.1,
+    "usage_score": 85.7,
+    "cancellation_score": 40.0,
+    "weighted_total": 36.4,
+    "sufficient_data": true
+  },
+  "ai_explanation": "...",
+  "policy_context": "...",
+  "trace": [...],
+  "assumptions": [
+    "Prices are in INR unless otherwise specified.",
+    "Taxes and service fees are not included.",
+    "Introductory pricing reverts to regular rate after the stated period.",
+    "Non-monthly prices were converted to monthly equivalents for comparison."
+  ],
+  "missing_info": [],
+  "verification_passed": true,
+  "verification_notes": [],
+  "elapsed_seconds": 9.196,
+  "guardrail_passed": true
+}
+```
+
+---
+
+## 9. Running Automated Tests
+
+```powershell
+# 1. Deterministic comparison engine tests (57 tests, no LLM required)
+python tests/test_comparison_engine.py
+
+# 2. Live API end-to-end integration test (requires Ollama and running server)
+python tests/test_live_api.py
+
+# 3. Base multi-agent supervisor verification
+python verify_all.py
+```
+

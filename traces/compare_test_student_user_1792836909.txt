@@ -1,0 +1,13 @@
+Input guardrail: Looks okay.
+Running deterministic cost calculations...
+Cost calculation complete: Entertainment Lite ₹3139.50/yr vs Entertainment Pro Annual ₹2160.00/yr
+Recommendation: plan_b
+Scores: Entertainment Lite=16.4, Entertainment Pro Annual=36.4 (priority: student_budget)
+Policy search: found 3 relevant chunk(s).
+Generating AI explanation grounded in calculations and policy...
+AI explanation generated.
+User profile saved for test_student_user.
+Total elapsed: 9.196s
+
+RESULT
+Entertainment Pro Annual offers a significant first-year savings of ₹979.50, making it the more cost-effective option. Despite having fewer features like 4K Ultra HD and offline downloads, Entertainment Pro Annual scores 20.0 points higher (A: 16.4, B: 36.4) under the 'student_budget' priority. The recommendation is based on the best value for money, not just the cheapest option. Trade-offs include fewer devices and 4K streaming, but these are outweighed by the substantial savings and higher score. The policy context emphasizes that the cheapest subscription is not necessarily the best value, highlighting the importance of considering features and value beyond just cost.
