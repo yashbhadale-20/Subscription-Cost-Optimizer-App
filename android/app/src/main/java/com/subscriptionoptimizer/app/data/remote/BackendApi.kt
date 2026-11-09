@@ -70,8 +70,33 @@ interface BackendApi {
     suspend fun profile(@Header("Authorization") auth: String, @Path("userId") userId: String): MemoryResponseDto
 
     @POST("policy/ask")
-    suspend fun askPolicy(@Body body: PolicyAskRequestDto): PolicyAskResponseDto
+    suspend fun askPolicy(@Header("Authorization") auth: String, @Body body: PolicyAskRequestDto): PolicyAskResponseDto
 
     @GET("policy/status")
     suspend fun policyStatus(): PolicyStatusDto
+
+    @POST("optimize")
+    suspend fun optimize(@Header("Authorization") auth: String, @Body body: OptimizeRequestDto): OptimizeResponseDto
+
+    @GET("optimizations")
+    suspend fun optimizations(
+        @Header("Authorization") auth: String,
+        @Query("limit") limit: Int,
+        @Query("offset") offset: Int = 0,
+    ): OptimizationListDto
+
+    @GET("optimizations/{id}")
+    suspend fun optimization(@Header("Authorization") auth: String, @Path("id") id: String): SavedOptimizationDto
+
+    @GET("optimizations/{id}/trace")
+    suspend fun optimizationTrace(@Header("Authorization") auth: String, @Path("id") id: String): OptimizationTraceDto
+
+    @DELETE("optimizations/{id}")
+    suspend fun deleteOptimization(@Header("Authorization") auth: String, @Path("id") id: String)
+
+    @GET("portfolio")
+    suspend fun portfolio(@Header("Authorization") auth: String): PortfolioDto
+
+    @PUT("portfolio")
+    suspend fun savePortfolio(@Header("Authorization") auth: String, @Body body: PortfolioRequestDto): PortfolioDto
 }

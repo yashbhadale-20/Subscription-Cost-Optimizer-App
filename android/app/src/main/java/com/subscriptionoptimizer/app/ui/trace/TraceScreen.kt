@@ -65,7 +65,14 @@ sealed interface TraceUiState {
     data class Failed(val title: String, val message: String) : TraceUiState
 }
 
-class TraceViewModel(savedStateHandle: SavedStateHandle, private val history: HistoryRepository) : ViewModel() {
+/** Loads a trace by id: a saved comparison's (`/history/{id}/trace`) or an optimization's (`/optimizations/{id}/trace`). */
+class TraceViewModel(
+    savedStateHandle: SavedStateHandle,
+    private val loadTrace: suspend (String) -> Result<List<TraceEvent>>,
+) : ViewModel() {
+    constructor(savedStateHandle: SavedStateHandle, history: HistoryRepository) :
+        this(savedStateHandle, { id: String -> history.trace(id) })
+
     private val id: String? = savedStateHandle[Routes.RESULT_ID_ARG]
     private val _uiState = MutableStateFlow<TraceUiState>(TraceUiState.Loading)
     val uiState: StateFlow<TraceUiState> = _uiState.asStateFlow()
@@ -81,7 +88,7 @@ class TraceViewModel(savedStateHandle: SavedStateHandle, private val history: Hi
         }
         _uiState.value = TraceUiState.Loading
         viewModelScope.launch {
-            _uiState.value = history.trace(id).fold(
+            _uiState.value = loadTrace(id).fold(
                 onSuccess = { TraceUiState.Loaded(it) },
                 onFailure = { e ->
                     if (e is RepositoryError.NotFound) TraceUiState.NotFound
@@ -93,6 +100,9 @@ class TraceViewModel(savedStateHandle: SavedStateHandle, private val history: Hi
 
     companion object {
         val Factory = appViewModelFactory { TraceViewModel(createSavedStateHandle(), it.historyRepository) }
+        val OptimizationFactory = appViewModelFactory { container ->
+            TraceViewModel(createSavedStateHandle()) { id -> container.optimizeRepository.trace(id) }
+        }
     }
 }
 
@@ -113,7 +123,7 @@ fun TraceScreen(state: TraceUiState, onBack: () -> Unit, onRetry: () -> Unit) {
                 TraceUiState.NotFound -> EmptyState(
                     icon = Icons.Outlined.AccountTree,
                     title = "Trace not available",
-                    message = "The comparison was deleted or belongs to another user.",
+                    message = "It was deleted or belongs to another user.",
                     actionLabel = "Go back",
                     onAction = onBack,
                 )
@@ -136,7 +146,7 @@ private fun TraceList(events: List<TraceEvent>) {
         if (events.isEmpty()) {
             item(key = "empty") {
                 Text(
-                    "This comparison was saved without trace events (it predates structured traces).",
+                    "This record was saved without trace events (it predates structured traces).",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }

@@ -83,7 +83,13 @@ def test_live_unrelated_questions_return_no_evidence(real_store, question):
 def test_live_index_status_reports_drift_without_changing_anything(real_store):
     status = policy_rag.index_status(real_store)
     assert status["available"] is True
-    assert status["indexed_chunks"] == status["file_chunks"] == 11
-    # Chunks 3, 8 and 11 were embedded from an earlier version of the policy file.
-    assert status["stale_chunks"] == [3, 8, 11]
-    assert status["missing_chunks"] == []
+    assert status["file_chunks"] == 14
+    if status["indexed_chunks"] == 11:
+        # The shipped index: chunks 3, 8 and 11 were embedded from an earlier version of the policy
+        # file, and chunks 12-14 (unused, overlapping, annual billing) were added to the file later.
+        assert status["stale_chunks"] == [3, 8, 11]
+        assert status["missing_chunks"] == [12, 13, 14]
+    else:
+        # After `python -m backend.reindex_policy` the index matches the file.
+        assert status["indexed_chunks"] == 14
+        assert status["stale_chunks"] == [] and status["missing_chunks"] == []

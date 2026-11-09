@@ -133,6 +133,12 @@ class CompareViewModel(
     fun removeUsageLimit(slot: PlanSlot, id: Long) =
         updatePlan(slot) { form -> form.copy(usageLimits = form.usageLimits.filterNot { it.id == id }) }
 
+    /** Exchanges the two plans. Field errors follow their plan, and the "duplicate name" check is redone. */
+    fun swapPlans() {
+        _uiState.update { it.copy(planA = it.planB, planB = it.planA) }
+        revalidateIfNeeded()
+    }
+
     fun dismissSubmitError() = _uiState.update { it.copy(submitError = null) }
 
     fun reset() {

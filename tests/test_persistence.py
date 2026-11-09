@@ -69,7 +69,7 @@ def test_legacy_rows_are_preserved_and_backed_up(tmp_path, monkeypatch):
     assert _version(backup) == 0, "the backup is the pre-migration database"
 
     # Idempotent: a second run changes nothing and makes no new backup.
-    assert db.migrate() == {"from_version": 1, "to_version": 1, "backup": None}
+    assert db.migrate() == {"from_version": db.SCHEMA_VERSION, "to_version": db.SCHEMA_VERSION, "backup": None}
     assert _rows(path) == before
     assert len(list(tmp_path.glob("*.bak"))) == 1
 

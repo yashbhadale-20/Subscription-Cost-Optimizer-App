@@ -19,7 +19,9 @@ import com.subscriptionoptimizer.app.data.repository.HttpConnectionTester
 import com.subscriptionoptimizer.app.data.repository.HttpHistoryRepository
 import com.subscriptionoptimizer.app.data.repository.HttpPolicyRepository
 import com.subscriptionoptimizer.app.data.repository.HttpPreferencesRepository
+import com.subscriptionoptimizer.app.data.repository.HttpOptimizeRepository
 import com.subscriptionoptimizer.app.data.repository.HttpProfileRepository
+import com.subscriptionoptimizer.app.data.repository.OptimizeRepository
 import com.subscriptionoptimizer.app.data.repository.PolicyRepository
 import com.subscriptionoptimizer.app.data.repository.PreferencesRepository
 import com.subscriptionoptimizer.app.data.repository.ProfileRepository
@@ -34,16 +36,18 @@ class AppContainer(context: Context) {
         enableLogging = BuildConfig.DEBUG,
     )
 
-    val settingsRepository: SettingsRepository = DataStoreSettingsRepository(context)
-    private val sessions = SessionManager(backendClient, settingsRepository, DataStoreTokenStore(context))
+    private val tokenStore = DataStoreTokenStore(context)
+    val settingsRepository: SettingsRepository = DataStoreSettingsRepository(context, tokenStore)
+    private val sessions = SessionManager(backendClient, settingsRepository, tokenStore)
 
     val historyRepository: HistoryRepository = HttpHistoryRepository(sessions, settingsRepository)
     val comparisonRepository: ComparisonRepository = HttpComparisonRepository(sessions)
     val chatRepository: ChatRepository = HttpChatRepository(sessions)
     val preferencesRepository: PreferencesRepository = HttpPreferencesRepository(sessions)
-    val policyRepository: PolicyRepository = HttpPolicyRepository(backendClient, settingsRepository)
+    val policyRepository: PolicyRepository = HttpPolicyRepository(sessions, backendClient, settingsRepository)
     val profileRepository: ProfileRepository = HttpProfileRepository(sessions)
     val connectionTester: ConnectionTester = HttpConnectionTester(backendClient)
+    val optimizeRepository: OptimizeRepository = HttpOptimizeRepository(sessions, settingsRepository)
 }
 
 /** Builds a ViewModel factory that receives the app's [AppContainer]. */

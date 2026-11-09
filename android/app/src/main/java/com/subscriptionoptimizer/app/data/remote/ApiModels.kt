@@ -313,3 +313,152 @@ data class MemoryResponseDto(
     val profile: JsonObject,
     val timestamp: String? = null,
 )
+
+// ── /optimize, /optimizations, /portfolio ────────────────────────────────────
+
+@Serializable
+data class CheaperTierDto(
+    val name: String,
+    val price: Double,
+    @SerialName("billing_cycle") val billingCycle: String = "monthly",
+    @SerialName("features_lost") val featuresLost: List<String> = emptyList(),
+)
+
+/** `SubscriptionInput`: sent in requests, and returned as saved by `/portfolio` and `/optimizations/{id}`. */
+@Serializable
+data class SubscriptionDto(
+    val id: String,
+    val name: String,
+    val provider: String? = null,
+    val category: String = "other",
+    val price: Double,
+    @SerialName("billing_cycle") val billingCycle: String = "monthly",
+    @SerialName("discount_percent") val discountPercent: Double = 0.0,
+    @SerialName("intro_months") val introMonths: Int? = null,
+    @SerialName("post_intro_price") val postIntroPrice: Double? = null,
+    @SerialName("uses_per_month") val usesPerMonth: Int? = null,
+    @SerialName("last_used_days_ago") val lastUsedDaysAgo: Int? = null,
+    @SerialName("renewal_date") val renewalDate: String? = null,
+    @SerialName("cheaper_tier") val cheaperTier: CheaperTierDto? = null,
+    @SerialName("annual_price") val annualPrice: Double? = null,
+    @SerialName("shared_with") val sharedWith: Int = 0,
+    @SerialName("must_keep") val mustKeep: Boolean = false,
+)
+
+@Serializable
+data class OptimizeRequestDto(
+    @SerialName("user_id") val userId: String,
+    val goal: String? = null,
+    @SerialName("monthly_budget") val monthlyBudget: Double? = null,
+    val subscriptions: List<SubscriptionDto>,
+    @SerialName("save_portfolio") val savePortfolio: Boolean = false,
+)
+
+@Serializable
+data class OptimizeActionDto(
+    @SerialName("action_id") val actionId: String,
+    @SerialName("subscription_id") val subscriptionId: String,
+    val name: String,
+    val action: String,
+    val reason: String,
+    @SerialName("monthly_savings") val monthlySavings: Double,
+    @SerialName("annual_savings") val annualSavings: Double,
+    @SerialName("policy_chunks") val policyChunks: List<Int> = emptyList(),
+)
+
+@Serializable
+data class BudgetDto(
+    val target: Double,
+    val achievable: Boolean,
+    val met: Boolean,
+    val gap: Double,
+)
+
+@Serializable
+data class RenewalAlertDto(
+    @SerialName("subscription_id") val subscriptionId: String,
+    val name: String,
+    val kind: String,
+    @SerialName("renewal_date") val renewalDate: String,
+    @SerialName("days_until") val daysUntil: Int,
+    @SerialName("current_monthly") val currentMonthly: Double,
+    @SerialName("after_monthly") val afterMonthly: Double,
+    @SerialName("price_jump_monthly") val priceJumpMonthly: Double,
+    @SerialName("charge_amount") val chargeAmount: Double,
+)
+
+@Serializable
+data class OptimizeResponseDto(
+    @SerialName("current_monthly_total") val currentMonthlyTotal: Double,
+    @SerialName("current_annual_total") val currentAnnualTotal: Double,
+    val actions: List<OptimizeActionDto>,
+    @SerialName("optimized_monthly_total") val optimizedMonthlyTotal: Double,
+    @SerialName("optimized_annual_total") val optimizedAnnualTotal: Double,
+    @SerialName("total_monthly_savings") val totalMonthlySavings: Double = 0.0,
+    @SerialName("total_annual_savings") val totalAnnualSavings: Double,
+    @SerialName("percentage_savings") val percentageSavings: Double,
+    val budget: BudgetDto? = null,
+    @SerialName("renewal_alerts") val renewalAlerts: List<RenewalAlertDto> = emptyList(),
+    @SerialName("ai_summary") val aiSummary: String,
+    @SerialName("policy_evidence") val policyEvidence: List<PolicyEvidenceDto> = emptyList(),
+    @SerialName("cited_chunks") val citedChunks: List<Int> = emptyList(),
+    @SerialName("unsupported_citations") val unsupportedCitations: List<Int> = emptyList(),
+    val assumptions: List<String> = emptyList(),
+    @SerialName("missing_info") val missingInfo: List<String> = emptyList(),
+    @SerialName("verification_passed") val verificationPassed: Boolean = true,
+    @SerialName("verification_notes") val verificationNotes: List<String> = emptyList(),
+    @SerialName("used_fallback") val usedFallback: Boolean = false,
+    @SerialName("fallback_reason") val fallbackReason: String? = null,
+    @SerialName("guardrail_passed") val guardrailPassed: Boolean = true,
+    @SerialName("trace_events") val traceEvents: List<TraceEventDto> = emptyList(),
+    /** Null when the backend could not save the optimization. */
+    @SerialName("optimization_id") val optimizationId: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("elapsed_seconds") val elapsedSeconds: Double = 0.0,
+)
+
+@Serializable
+data class OptimizationSummaryDto(
+    val id: String,
+    @SerialName("created_at") val createdAt: String,
+    val goal: String? = null,
+    @SerialName("monthly_budget") val monthlyBudget: Double? = null,
+    @SerialName("subscription_count") val subscriptionCount: Int,
+    @SerialName("total_annual_savings") val totalAnnualSavings: Double,
+    @SerialName("used_fallback") val usedFallback: Boolean,
+)
+
+@Serializable
+data class OptimizationListDto(
+    val items: List<OptimizationSummaryDto>,
+    val total: Int,
+    val limit: Int,
+    val offset: Int,
+)
+
+@Serializable
+data class SavedOptimizationDto(
+    val id: String,
+    @SerialName("created_at") val createdAt: String,
+    val goal: String? = null,
+    @SerialName("monthly_budget") val monthlyBudget: Double? = null,
+    val subscriptions: List<SubscriptionDto>,
+    val result: OptimizeResponseDto,
+)
+
+@Serializable
+data class OptimizationTraceDto(
+    @SerialName("optimization_id") val optimizationId: String,
+    @SerialName("created_at") val createdAt: String,
+    val events: List<TraceEventDto>,
+)
+
+@Serializable
+data class PortfolioRequestDto(val subscriptions: List<SubscriptionDto>)
+
+@Serializable
+data class PortfolioDto(
+    @SerialName("user_id") val userId: String,
+    val subscriptions: List<SubscriptionDto>,
+    @SerialName("updated_at") val updatedAt: String? = null,
+)

@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
@@ -21,7 +22,7 @@ from pydantic import ValidationError
 from backend.config import settings
 from backend.dependencies import startup_state, shutdown_state
 from backend.models import ErrorResponse
-from backend.routers import auth, chat, compare, health, history, memory, policy, preferences
+from backend.routers import auth, chat, compare, health, history, memory, optimize, policy, preferences
 
 # ── logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -83,13 +84,29 @@ app.add_middleware(
 # Global exception handlers
 # ─────────────────────────────────────────────────────────────────────────────
 
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(request: Request, exc: RequestValidationError):
+    # Same shape as FastAPI's default ({"detail": [{"loc", "msg", "type"}]}) minus the echoed
+    # "input"/"ctx": echoing NaN or Infinity made the error response itself fail to serialise
+    # (a 500 instead of a 422), and echoing bodies back is unnecessary anyway.
+    errors = [
+        {"loc": list(err.get("loc", ())), "msg": err.get("msg", ""), "type": err.get("type", "")}
+        for err in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
 @app.exception_handler(ValidationError)
 async def pydantic_validation_handler(request: Request, exc: ValidationError):
+    # Request bodies are validated by FastAPI (RequestValidationError → 422 with field errors).
+    # A pydantic ValidationError reaching this handler was raised while building a response or
+    # internal model, so it is a server fault: log the details, return nothing internal.
+    logger.error("Internal validation error on %s: %s", request.url.path, exc)
     return JSONResponse(
-        status_code=422,
+        status_code=500,
         content=ErrorResponse(
-            error="Validation error",
-            detail=str(exc),
+            error="Internal server error",
+            detail="The server produced an invalid result. Check server logs.",
         ).model_dump(),
     )
 
@@ -118,6 +135,7 @@ app.include_router(policy.router)
 app.include_router(auth.router)
 app.include_router(history.router)
 app.include_router(preferences.router)
+app.include_router(optimize.router)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -144,6 +162,13 @@ async def root():
             "GET    /history/{id}/trace           (bearer token)",
             "DELETE /history/{id}                 (bearer token)",
             "DELETE /history                      (bearer token)",
+            "POST   /optimize                     (bearer token)",
+            "GET    /optimizations                (bearer token)",
+            "GET    /optimizations/{id}           (bearer token)",
+            "GET    /optimizations/{id}/trace     (bearer token)",
+            "DELETE /optimizations/{id}           (bearer token)",
+            "GET    /portfolio                    (bearer token)",
+            "PUT    /portfolio                    (bearer token)",
             "GET    /preferences                  (bearer token)",
             "PUT    /preferences                  (bearer token)",
             "GET    /memory/{user_id}             (bearer token)",

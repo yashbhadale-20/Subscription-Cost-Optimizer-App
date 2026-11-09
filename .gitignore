@@ -19,3 +19,8 @@ verify_all.py
 
 # Database backups written before schema migrations
 *.pre-migration-v*.bak
+
+# Per-request traces hold user IDs and plan details
+traces/compare_*.txt
+traces/optimize_*.txt
+traces/api_*.txt

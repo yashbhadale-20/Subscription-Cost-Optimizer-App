@@ -9,6 +9,7 @@ copied (migration tests).
 from __future__ import annotations
 
 import sys
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -99,6 +100,38 @@ class FakeConversationAgent:
         return {"messages": [AIMessage(content=self.reply)]}
 
 
+class FakeOptimizerAgent:
+    """
+    Stands in for backend.optimizer_agent.optimizer_agent. ``tool_calls`` are run
+    against the real tools (so they read the request context, as the model's
+    calls would) before ``reply`` is returned. ``delay`` makes it slow.
+    """
+
+    def __init__(self, reply: str = "", error: Exception | None = None, delay: float = 0.0,
+                 tool_calls: list[tuple[str, dict[str, Any]]] | None = None):
+        self.reply = reply
+        self.error = error
+        self.delay = delay
+        self.tool_calls = tool_calls or []
+        self.tool_results: list[str] = []
+        self.calls: list[dict[str, Any]] = []
+
+    def invoke(self, payload: dict[str, Any], config: Any = None):
+        import time
+
+        from backend import optimizer_agent
+
+        self.calls.append({"prompt": payload["messages"][-1]["content"], "config": config})
+        tools = {t.name: t for t in optimizer_agent.TOOLS}
+        for name, args in self.tool_calls:
+            self.tool_results.append(tools[name].invoke(args))
+        if self.delay:
+            time.sleep(self.delay)
+        if self.error:
+            raise self.error
+        return {"messages": [AIMessage(content=self.reply)]}
+
+
 @pytest.fixture
 def temp_db(tmp_path, monkeypatch):
     path = tmp_path / "memory.sqlite"
@@ -128,7 +161,16 @@ def conversation_agent(monkeypatch):
 
 
 @pytest.fixture
-def client(temp_db, fake_store, review_agent, conversation_agent, monkeypatch):
+def optimizer_agent(monkeypatch):
+    from backend import optimizer_agent as module
+
+    agent = FakeOptimizerAgent(reply='{"chosen_action_ids": [], "summary": ""}')
+    monkeypatch.setattr(module, "optimizer_agent", agent)
+    return agent
+
+
+@pytest.fixture
+def client(temp_db, fake_store, review_agent, conversation_agent, optimizer_agent, monkeypatch):
     from fastapi.testclient import TestClient
 
     from backend.dependencies import get_store
@@ -146,6 +188,11 @@ def session(client, user_id: str) -> dict[str, str]:
     response = client.post("/auth/session", json={"user_id": user_id})
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['token']}"}
+
+
+def fresh_session(client) -> dict[str, str]:
+    """A session for a new, unique user, for calls where the user doesn't matter."""
+    return session(client, f"user_{uuid.uuid4().hex[:12]}")
 
 
 def compare_payload(user_id: str, **overrides) -> dict[str, Any]:

@@ -187,6 +187,13 @@ class BackendClientTest {
     }
 
     @Test
+    fun `unreachable hint names the configured port`() {
+        val error = client.mapError(java.net.ConnectException("refused"), "http://10.0.2.2:8765/".toHttpUrl(), CallProfile.QUICK)
+        assertTrue(error is RepositoryError.Unreachable)
+        assertTrue(error.message, error.message!!.contains("--port 8765"))
+    }
+
+    @Test
     fun `release builds refuse plain HTTP before any request is made`() = runBlocking {
         val httpsOnly = BackendClient(allowCleartext = false)
         val error = HttpComparisonRepository(SessionManager(httpsOnly, settings, tokens)).compare(sampleRequest).exceptionOrNull()
@@ -312,6 +319,12 @@ class BackendClientTest {
         assertEquals("input_guardrail", stages.first())
         assertEquals("save_comparison", stages.last())
         assertEquals("comparison_engine.run_comparison", saved.result.traceEvents.first { it.stage == "cost_calculation" }.name)
+        // Lists in trace data are readable text, not raw JSON.
+        assertEquals("8, 7, 3", saved.result.traceEvents.first { it.stage == "policy_retrieval" }.data["chunks"])
+        assertEquals(
+            "No usage limits provided for Stream Plus Annual.\nNo cancellation terms provided for Stream Basic.",
+            saved.result.traceEvents.first { it.stage == "cost_calculation" }.data["missing_info"],
+        )
 
         // Cached: a second get makes no request.
         history.get(saved.id).getOrThrow()
@@ -323,6 +336,32 @@ class BackendClientTest {
         server.enqueue(json(404, """{"detail":{"error":"Not found","message":"No such saved comparison."}}"""))
         val error = HttpHistoryRepository(sessions(), settings).get("0".repeat(32)).exceptionOrNull()
         assertTrue("was $error", error is RepositoryError.NotFound)
+    }
+
+    @Test
+    fun `an unsaved result missing from the cache is NotFound without a request`() = runBlocking {
+        val error = HttpHistoryRepository(sessions(), settings).get("unsaved-1234").exceptionOrNull()
+        assertTrue("was $error", error is RepositoryError.NotFound)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `switching user clears the previous user's history`() = runBlocking {
+        server.enqueue(json(200, fixture("history_item.json").let { """{"items":[$it],"total":1,"limit":50,"offset":0}""" }))
+        val history = HttpHistoryRepository(sessions(), settings)
+        history.refresh()
+        assertEquals(1, history.state.value.entries.size)
+
+        settings.url.value = settings.url.value.trimEnd('/') + "/other/" // a different backend
+        tokens.map["${settings.url.value}|student_1"] = "tok-other"
+        server.enqueue(json(200, """{"items":[],"total":0,"limit":50,"offset":0}"""))
+        history.refresh()
+
+        assertTrue(history.state.value.entries.isEmpty())
+        // The old user's cached item is gone: reading it asks the new backend, which says 404.
+        server.enqueue(json(404, """{"detail":{"error":"Not found","message":"No such saved comparison."}}"""))
+        assertTrue(history.get("2217661ac3da4749b391b760a6d5490d").exceptionOrNull() is RepositoryError.NotFound)
+        assertEquals(3, server.requestCount)
     }
 
     @Test
@@ -338,11 +377,11 @@ class BackendClientTest {
     @Test
     fun `policy answer from the real backend parses`() = runBlocking {
         server.enqueue(json(200, fixture("policy_ask.json")))
-        val answer = HttpPolicyRepository(client, settings).ask("Are taxes included in the price?").getOrThrow()
+        val answer = HttpPolicyRepository(sessions(), client, settings).ask("Are taxes included in the price?").getOrThrow()
 
         val recorded = server.takeRequest()
         assertEquals("/policy/ask", recorded.path)
-        assertEquals(null, recorded.getHeader("Authorization"))
+        assertEquals("Bearer tok-1", recorded.getHeader("Authorization"))
         assertTrue(answer.answeredFromPolicy)
         assertEquals(4, answer.evidence.first().chunk)
         assertEquals("policy_retrieval", answer.traceEvents.first().stage)

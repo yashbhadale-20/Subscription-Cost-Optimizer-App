@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.subscriptionoptimizer.app.ui.designsystem.theme.AppTheme
 import com.subscriptionoptimizer.app.ui.designsystem.theme.NumberStyles
@@ -196,6 +197,7 @@ fun KeyValueRow(
             .fillMaxWidth()
             .padding(vertical = Spacing.xs + 2.dp)
             .semantics(mergeDescendants = true) {},
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -205,10 +207,13 @@ fun KeyValueRow(
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(Spacing.md))
+        // At most half the row, so a long value wraps instead of squeezing the label to nothing.
         Text(
             value,
             style = if (emphasize) NumberStyles.amountSmall.copy(fontWeight = FontWeight.SemiBold) else NumberStyles.amountSmall,
             color = valueColor,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f, fill = false),
         )
     }
 }

@@ -4,10 +4,15 @@ No business logic lives here — only data shapes and validators.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import math
+import re
+import unicodedata
+from datetime import date, datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from backend.config import settings
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -50,6 +55,52 @@ _GUARDRAIL_BLOCKLIST = [
 ]
 
 
+_GUARDRAIL_PATTERNS = [
+    re.compile(
+        r"\b(?:ignore|disregard|forget|override)\b(?:\s+\w+){0,3}?\s+(?:previous|prior|above|earlier|preceding)"
+        r"\s+(?:\w+\s+)?(?:instructions?|prompts?|rules?)\b"
+    ),
+    re.compile(r"\b(?:reveal|show|print|repeat|display)\b(?:\s+\w+){0,3}?\s+system\s+prompt\b"),
+]
+
+# Limits that mirror the Android form, so oversized input is refused instead of reaching the LLM.
+_MAX_FEATURE_LENGTH = 100
+_MAX_USAGE_LIMITS = 20
+_MAX_USAGE_FIELD = 40
+
+
+def _guard(text: str, what: str) -> str:
+    """
+    Reject blocklisted phrases and common rewordings of them. Width variants, invisible
+    characters, case and runs of whitespace are normalised first. Applied to every free-text
+    field that ends up in an LLM prompt, not just the question. This is a basic filter, not a
+    defence against a determined prompt injection: the model's output is still never trusted
+    for figures, which come from the deterministic engine.
+    """
+    folded = "".join(c for c in unicodedata.normalize("NFKC", text) if unicodedata.category(c) != "Cf")
+    low = " ".join(folded.lower().split())
+    for phrase in _GUARDRAIL_BLOCKLIST:
+        if phrase in low:
+            raise ValueError(f"{what} contains disallowed content: {phrase!r}")
+    if any(pattern.search(low) for pattern in _GUARDRAIL_PATTERNS):
+        raise ValueError(f"{what} contains disallowed content")
+    return text
+
+
+def _not_bool(value: Any) -> Any:
+    # Pydantic would otherwise read true as 1, so a client bug would price a plan at ₹1.
+    if isinstance(value, bool):
+        raise ValueError("must be a number, not true or false")
+    return value
+
+
+def _non_blank(text: str, what: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        raise ValueError(f"{what} must not be blank")
+    return stripped
+
+
 class DiscountInput(BaseModel):
     """Optional discount / introductory offer details."""
     percent: float = Field(default=0.0, ge=0.0, le=100.0,
@@ -58,6 +109,15 @@ class DiscountInput(BaseModel):
                                      description="Number of months the intro offer lasts (None = ongoing)")
     post_intro_price: float | None = Field(default=None, ge=0.0, le=1_000_000.0,
                                            description="Monthly price after intro period expires")
+
+    _numbers_not_bools = field_validator("percent", "intro_months", "post_intro_price", mode="before")(_not_bool)
+
+    @model_validator(mode="after")
+    def post_intro_needs_intro(self):
+        # Without intro_months the engine treats the discount as ongoing and would silently ignore it.
+        if self.post_intro_price is not None and self.intro_months is None:
+            raise ValueError("post_intro_price requires intro_months")
+        return self
 
 
 class PlanInput(BaseModel):
@@ -81,14 +141,20 @@ class PlanInput(BaseModel):
     renewal_note: str | None = Field(default=None, max_length=500,
                                      description="Notes about renewal pricing changes")
 
+    _numbers_not_bools = field_validator("monthly_price", "discount_percent", mode="before")(_not_bool)
+
     @field_validator("name")
     @classmethod
     def name_no_injections(cls, v: str) -> str:
-        low = v.lower()
-        for phrase in _GUARDRAIL_BLOCKLIST:
-            if phrase in low:
-                raise ValueError(f"Plan name contains disallowed content: {phrase!r}")
-        return v.strip()
+        return _guard(_non_blank(v, "Plan name"), "Plan name")
+
+    @field_validator("provider", "cancellation_terms", "renewal_note")
+    @classmethod
+    def text_no_injections(cls, v: str | None, info) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        return _guard(v, info.field_name.replace("_", " ").capitalize()) if v else None
 
     @field_validator("billing_cycle")
     @classmethod
@@ -101,8 +167,30 @@ class PlanInput(BaseModel):
     @field_validator("features")
     @classmethod
     def features_no_empty(cls, v: list[str] | None) -> list[str] | None:
-        if v is not None:
-            return [f.strip() for f in v if f.strip()]
+        if v is None:
+            return v
+        cleaned = [f.strip() for f in v if f.strip()]
+        for feature in cleaned:
+            if len(feature) > _MAX_FEATURE_LENGTH:
+                raise ValueError(f"Each feature must be at most {_MAX_FEATURE_LENGTH} characters")
+            _guard(feature, "Feature")
+        return cleaned
+
+    @field_validator("usage_limits")
+    @classmethod
+    def usage_limits_bounded(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        if v is None:
+            return v
+        if len(v) > _MAX_USAGE_LIMITS:
+            raise ValueError(f"At most {_MAX_USAGE_LIMITS} usage limits")
+        for key, value in v.items():
+            if not isinstance(value, (str, int, float, bool)) or value is None:
+                raise ValueError("Usage limit values must be text or numbers")
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ValueError("Usage limit values must be finite numbers")
+            if not key.strip() or len(key) > _MAX_USAGE_FIELD or len(str(value)) > _MAX_USAGE_FIELD:
+                raise ValueError(f"Usage limit names and values must be 1-{_MAX_USAGE_FIELD} characters")
+            _guard(f"{key} {value}", "Usage limit")
         return v
 
     @model_validator(mode="after")
@@ -128,11 +216,7 @@ class CompareRequest(BaseModel):
     @field_validator("question")
     @classmethod
     def question_not_adversarial(cls, v: str) -> str:
-        low = v.lower()
-        for phrase in _GUARDRAIL_BLOCKLIST:
-            if phrase in low:
-                raise ValueError(f"Question contains disallowed content: {phrase!r}")
-        return v.strip()
+        return _guard(_non_blank(v, "Question"), "Question")
 
     @field_validator("priority")
     @classmethod
@@ -269,11 +353,7 @@ class ChatRequest(BaseModel):
     @field_validator("message")
     @classmethod
     def message_safe(cls, v: str) -> str:
-        low = v.lower()
-        for phrase in _GUARDRAIL_BLOCKLIST:
-            if phrase in low:
-                raise ValueError(f"Message contains disallowed content: {phrase!r}")
-        return v.strip()
+        return _guard(_non_blank(v, "Message"), "Message")
 
 
 class ChatResponse(BaseModel):
@@ -395,11 +475,7 @@ class PolicyAskRequest(BaseModel):
     @field_validator("question")
     @classmethod
     def question_safe(cls, v: str) -> str:
-        low = v.lower()
-        for phrase in _GUARDRAIL_BLOCKLIST:
-            if phrase in low:
-                raise ValueError(f"Question contains disallowed content: {phrase!r}")
-        return v.strip()
+        return _guard(_non_blank(v, "Question"), "Question")
 
 
 class PolicyAskResponse(BaseModel):
@@ -472,6 +548,251 @@ class PolicySearchResponse(BaseModel):
     chunks: list[str]
     chunk_count: int
     timestamp: str = Field(default_factory=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /optimize and /portfolio
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CATEGORIES = {
+    "video_streaming", "music", "cloud_storage", "news", "gaming",
+    "productivity", "fitness", "education", "other",
+}
+_BILLING_CYCLES = {"monthly", "quarterly", "semi_annual", "annual"}
+_MAX_SUBSCRIPTIONS = 30
+
+
+def _billing_cycle(v: str) -> str:
+    if v.lower() not in _BILLING_CYCLES:
+        raise ValueError(f"billing_cycle must be one of {sorted(_BILLING_CYCLES)}, got {v!r}")
+    return v.lower()
+
+
+class CheaperTierInput(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    price: float = Field(..., gt=0, le=1_000_000.0, description="Price per billing_cycle in INR")
+    billing_cycle: str = Field(default="monthly")
+    features_lost: list[str] = Field(default_factory=list, max_length=20)
+
+    _numbers_not_bools = field_validator("price", mode="before")(_not_bool)
+
+    @field_validator("name")
+    @classmethod
+    def name_safe(cls, v: str) -> str:
+        return _guard(_non_blank(v, "Tier name"), "Tier name")
+
+    @field_validator("billing_cycle")
+    @classmethod
+    def valid_cycle(cls, v: str) -> str:
+        return _billing_cycle(v)
+
+    @field_validator("features_lost")
+    @classmethod
+    def features_safe(cls, v: list[str]) -> list[str]:
+        cleaned = [f.strip() for f in v if f.strip()]
+        for feature in cleaned:
+            if len(feature) > _MAX_FEATURE_LENGTH:
+                raise ValueError(f"Each feature must be at most {_MAX_FEATURE_LENGTH} characters")
+            _guard(feature, "Feature")
+        return cleaned
+
+
+class SubscriptionInput(BaseModel):
+    """One subscription the user typed in. No card, bank or account data is accepted."""
+    id: str = Field(..., min_length=1, max_length=40, pattern=r"^[a-zA-Z0-9_\-]+$",
+                    description="Client-chosen id, unique within the request")
+    name: str = Field(..., min_length=1, max_length=120)
+    provider: str | None = Field(default=None, max_length=120)
+    category: str = Field(default="other", description=f"One of {sorted(_CATEGORIES)}")
+    price: float = Field(..., gt=0, le=1_000_000.0, description="Charge per billing_cycle in INR")
+    billing_cycle: str = Field(default="monthly")
+    discount_percent: float = Field(default=0.0, ge=0.0, le=100.0)
+    intro_months: int | None = Field(default=None, ge=1, le=60)
+    post_intro_price: float | None = Field(default=None, ge=0.0, le=1_000_000.0,
+                                           description="Price per billing_cycle after the intro offer")
+    uses_per_month: int | None = Field(default=None, ge=0, le=10_000)
+    last_used_days_ago: int | None = Field(default=None, ge=0, le=36_500)
+    renewal_date: date | None = Field(default=None, description="ISO date (YYYY-MM-DD) of the next renewal")
+    cheaper_tier: CheaperTierInput | None = None
+    annual_price: float | None = Field(default=None, gt=0, le=1_000_000.0,
+                                       description="Yearly price, for monthly plans that offer yearly billing")
+    shared_with: int = Field(default=0, ge=0, le=20, description="How many other people share it")
+    must_keep: bool = False
+
+    _numbers_not_bools = field_validator(
+        "price", "discount_percent", "intro_months", "post_intro_price", "uses_per_month",
+        "last_used_days_ago", "annual_price", "shared_with", mode="before",
+    )(_not_bool)
+
+    @field_validator("name")
+    @classmethod
+    def name_safe(cls, v: str) -> str:
+        return _guard(_non_blank(v, "Subscription name"), "Subscription name")
+
+    @field_validator("provider")
+    @classmethod
+    def provider_safe(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        return _guard(v.strip(), "Provider")
+
+    @field_validator("category")
+    @classmethod
+    def valid_category(cls, v: str) -> str:
+        if v.lower() not in _CATEGORIES:
+            raise ValueError(f"category must be one of {sorted(_CATEGORIES)}, got {v!r}")
+        return v.lower()
+
+    @field_validator("billing_cycle")
+    @classmethod
+    def valid_cycle(cls, v: str) -> str:
+        return _billing_cycle(v)
+
+    @model_validator(mode="after")
+    def consistent(self):
+        if self.post_intro_price is not None and self.intro_months is None:
+            raise ValueError("post_intro_price requires intro_months")
+        if self.annual_price is not None and self.billing_cycle != "monthly":
+            raise ValueError("annual_price only applies to monthly subscriptions")
+        return self
+
+
+def _unique_ids(subs: list[SubscriptionInput]) -> list[SubscriptionInput]:
+    seen: set[str] = set()
+    for s in subs:
+        if s.id in seen:
+            raise ValueError(f"Duplicate subscription id: {s.id!r}")
+        seen.add(s.id)
+    return subs
+
+
+class OptimizeRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_\-]+$")
+    goal: str | None = Field(default=None, max_length=settings.max_question_length,
+                             description="Optional free-text goal, e.g. 'Cut my streaming costs'")
+    monthly_budget: float | None = Field(default=None, ge=0, le=10_000_000.0,
+                                         description="Optional target monthly total in INR")
+    subscriptions: list[SubscriptionInput] = Field(..., min_length=1, max_length=_MAX_SUBSCRIPTIONS)
+    save_portfolio: bool = Field(default=False, description="Also save this list as the user's portfolio")
+
+    _numbers_not_bools = field_validator("monthly_budget", mode="before")(_not_bool)
+
+    @field_validator("goal")
+    @classmethod
+    def goal_safe(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        return _guard(v.strip(), "Goal")
+
+    @field_validator("subscriptions")
+    @classmethod
+    def ids_unique(cls, v: list[SubscriptionInput]) -> list[SubscriptionInput]:
+        return _unique_ids(v)
+
+
+class OptimizeActionResponse(BaseModel):
+    action_id: str
+    subscription_id: str
+    name: str
+    action: str = Field(description="cancel, downgrade, switch_to_annual, review_before_renewal or keep")
+    reason: str
+    monthly_savings: float
+    annual_savings: float
+    policy_chunks: list[int] = []
+
+
+class BudgetResponse(BaseModel):
+    target: float
+    achievable: bool = Field(description="Whether any combination of the candidate actions reaches the target")
+    met: bool = Field(description="Whether this plan's optimized monthly total is at or under the target")
+    gap: float = Field(description="How far this plan's monthly total is above the target (0 when met)")
+
+
+class RenewalAlertResponse(BaseModel):
+    subscription_id: str
+    name: str
+    kind: str = Field(description="intro_ending or renewal")
+    renewal_date: str
+    days_until: int
+    current_monthly: float
+    after_monthly: float
+    price_jump_monthly: float
+    charge_amount: float
+
+
+class OptimizeResponse(BaseModel):
+    current_monthly_total: float
+    current_annual_total: float
+    actions: list[OptimizeActionResponse]
+    optimized_monthly_total: float
+    optimized_annual_total: float
+    total_monthly_savings: float = 0.0
+    total_annual_savings: float
+    percentage_savings: float
+    budget: BudgetResponse | None = None
+    renewal_alerts: list[RenewalAlertResponse] = []
+    ai_summary: str
+    policy_evidence: list[PolicyEvidence] = []
+    cited_chunks: list[int] = []
+    unsupported_citations: list[int] = []
+    assumptions: list[str] = []
+    missing_info: list[str] = []
+    verification_passed: bool = True
+    verification_notes: list[str] = []
+    used_fallback: bool = False
+    fallback_reason: str | None = None
+    guardrail_passed: bool = True
+    trace_events: list[TraceEvent] = []
+    optimization_id: str | None = Field(default=None, description="Id in GET /optimizations; null if not saved")
+    created_at: str | None = None
+    elapsed_seconds: float = 0.0
+
+
+class OptimizationSummary(BaseModel):
+    id: str
+    created_at: str
+    goal: str | None
+    monthly_budget: float | None
+    subscription_count: int
+    total_annual_savings: float
+    used_fallback: bool
+
+
+class OptimizationListResponse(BaseModel):
+    items: list[OptimizationSummary]
+    total: int
+    limit: int
+    offset: int
+
+
+class SavedOptimizationResponse(BaseModel):
+    id: str
+    created_at: str
+    goal: str | None
+    monthly_budget: float | None
+    subscriptions: list[dict[str, Any]]
+    result: OptimizeResponse
+
+
+class OptimizationTraceResponse(BaseModel):
+    optimization_id: str
+    created_at: str
+    events: list[TraceEvent]
+
+
+class PortfolioRequest(BaseModel):
+    subscriptions: list[SubscriptionInput] = Field(..., max_length=_MAX_SUBSCRIPTIONS)
+
+    @field_validator("subscriptions")
+    @classmethod
+    def ids_unique(cls, v: list[SubscriptionInput]) -> list[SubscriptionInput]:
+        return _unique_ids(v)
+
+
+class PortfolioResponse(BaseModel):
+    user_id: str
+    subscriptions: list[SubscriptionInput]
+    updated_at: str | None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

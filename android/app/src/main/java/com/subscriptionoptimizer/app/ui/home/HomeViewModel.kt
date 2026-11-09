@@ -50,10 +50,6 @@ class HomeViewModel(private val history: HistoryRepository) : ViewModel() {
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState(isLoading = true))
 
-    init {
-        refresh()
-    }
-
     /** Called on creation and whenever Home is shown again, so new comparisons and settings changes appear. */
     fun refresh() {
         viewModelScope.launch { history.refresh() }

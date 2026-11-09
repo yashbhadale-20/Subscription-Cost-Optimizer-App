@@ -34,6 +34,12 @@ enum class CallProfile(val connectSeconds: Long, val readSeconds: Long, val call
 
     /** The backend allows the model 180 s (`llm_timeout_seconds`) plus retrieval, so wait a bit longer. */
     LLM(connectSeconds = 10, readSeconds = 240, callSeconds = 270),
+
+    /**
+     * `POST /optimize`: the agent may take `optimizer_timeout_seconds` (180 s) after up to 30 s of
+     * policy retrieval before the backend answers (with the deterministic plan if needed).
+     */
+    OPTIMIZE(connectSeconds = 10, readSeconds = 260, callSeconds = 300),
 }
 
 /**
@@ -153,7 +159,7 @@ class BackendClient(
         } else {
             RepositoryError.Timeout(
                 "The backend didn't answer within ${profile.callSeconds}s. " +
-                    if (profile == CallProfile.LLM) {
+                    if (profile == CallProfile.LLM || profile == CallProfile.OPTIMIZE) {
                         "The local model may be loading or the computer may be busy. Try again."
                     } else {
                         "Check that the server is responsive."
@@ -165,7 +171,7 @@ class BackendClient(
 
     private fun unreachableHint(url: HttpUrl): String = buildString {
         append("Nothing answered at ${url.toString().trimEnd('/')}. ")
-        append("Start the backend with: uvicorn backend.main:app --host 0.0.0.0 --port 8000. ")
+        append("Start the backend with: uvicorn backend.main:app --host 0.0.0.0 --port ${url.port}. ")
         when (url.host) {
             "localhost", "127.0.0.1", "::1" -> append(
                 "On Android, localhost is the device itself, not your computer. " +

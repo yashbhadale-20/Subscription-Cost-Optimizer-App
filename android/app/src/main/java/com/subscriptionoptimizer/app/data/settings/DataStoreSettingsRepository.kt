@@ -9,16 +9,22 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.subscriptionoptimizer.app.data.model.AppSettings
 import com.subscriptionoptimizer.app.data.model.ThemePreference
 import com.subscriptionoptimizer.app.data.repository.SettingsRepository
+import com.subscriptionoptimizer.app.domain.UserIds
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
-class DataStoreSettingsRepository(context: Context) : SettingsRepository {
+class DataStoreSettingsRepository(
+    context: Context,
+    private val tokens: DataStoreTokenStore,
+) : SettingsRepository {
 
     private val dataStore = context.applicationContext.settingsDataStore
 
-    override val settings: Flow<AppSettings> = dataStore.data.map { prefs ->
+    override val settings: Flow<AppSettings> = dataStore.data.onStart { ensureUserId() }.map { prefs ->
         AppSettings(
             backendUrl = prefs[KEY_BACKEND_URL] ?: AppSettings.DEFAULT_BACKEND_URL,
             userId = prefs[KEY_USER_ID] ?: AppSettings.DEFAULT_USER_ID,
@@ -26,6 +32,13 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
                 ?.let { stored -> ThemePreference.entries.firstOrNull { it.name == stored } }
                 ?: ThemePreference.SYSTEM,
         )
+    }
+
+    /** Gives this install its own user ID the first time settings are read. */
+    private suspend fun ensureUserId() {
+        if (dataStore.data.first()[KEY_USER_ID] != null) return
+        val initial = UserIds.initial(hasLegacySession = tokens.hasSessionFor(AppSettings.DEFAULT_USER_ID))
+        dataStore.edit { if (KEY_USER_ID !in it) it[KEY_USER_ID] = initial }
     }
 
     override suspend fun setBackendUrl(url: String) {

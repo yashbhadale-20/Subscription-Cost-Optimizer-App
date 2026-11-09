@@ -37,6 +37,20 @@ class Settings(BaseSettings):
     max_discount_percent: float = 100.0
     max_policy_k: int = 10                    # max RAG chunks per request
     llm_timeout_seconds: int = 180            # asyncio.wait_for limit
+    retrieval_timeout_seconds: int = 30       # embedding + Chroma search
+    # LangGraph step cap per agent call. The API's agents have no tools, so a normal call
+    # takes 1–2 steps; this stops a misbehaving graph long before the library default (25).
+    agent_recursion_limit: int = 6
+    # The optimization agent has tools (list, candidates, estimate, budget, policy search), so it
+    # needs a few model→tool round trips: about 4 tool rounds plus the final answer.
+    optimizer_recursion_limit: int = 10
+    # Max wait for the optimization agent; on timeout the deterministic plan is returned.
+    optimizer_timeout_seconds: int = 180
+    # Renewal alerts cover renewals within this many days.
+    renewal_window_days: int = 14
+    # Threads for Ollama-backed calls. They're separate from the default pool because a timed-out
+    # call keeps its thread until the Ollama client gives up; extra requests wait for a free one.
+    model_workers: int = 4
 
     # ── RAG / memory ─────────────────────────────────────────────────────────
     # Minimum normalised relevance (0–1) for a chunk to count as evidence. Measured on

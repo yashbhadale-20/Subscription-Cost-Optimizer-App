@@ -32,6 +32,26 @@ class CompareValidationTest {
     }
 
     @Test
+    fun `amounts accept grouping commas but never guess at a decimal comma`() {
+        assertEquals(1299.5, CompareValidation.parseAmount("1,299.50")!!, 0.0)
+        assertEquals(100000.0, CompareValidation.parseAmount("1,00,000")!!, 0.0)
+        assertEquals(499.0, CompareValidation.parseAmount(" ₹ 499 ")!!, 0.0)
+        assertEquals(0.5, CompareValidation.parseAmount(".5")!!, 0.0)
+        // Was read as 49950.0.
+        assertNull(CompareValidation.parseAmount("499,50"))
+        assertNull(CompareValidation.parseAmount("1,2,3"))
+        assertNull(CompareValidation.parseAmount(""))
+        assertNull(CompareValidation.parseAmount("."))
+    }
+
+    @Test
+    fun `kotlin number syntax is not accepted as an amount`() {
+        listOf("499f", "499d", "1e5", "0x10", "NaN", "Infinity", "-5").forEach {
+            assertNull(it, CompareValidation.parseAmount(it))
+        }
+    }
+
+    @Test
     fun `discount outside 0 to 100 is rejected`() {
         assertTrue(PlanField.DISCOUNT in CompareValidation.validatePlan(valid.copy(discountPercent = "101")))
         assertTrue(PlanField.DISCOUNT in CompareValidation.validatePlan(valid.copy(discountPercent = "-5")))

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import ta2_subscription_optimizer as core
 
-from conftest import FakeStore, compare_payload, session
+from conftest import FakeStore, compare_payload, fresh_session, session
 
 
 # ── Sessions and access control ──────────────────────────────────────────────
@@ -103,9 +103,11 @@ def test_llm_failure_is_recorded_not_hidden(client, review_agent):
     alice = session(client, "alice")
     body = client.post("/compare", json=compare_payload("alice"), headers=alice).json()
 
-    assert body["ai_explanation"] == "(Could not generate explanation: model crashed)"
+    assert body["ai_explanation"] == "(Could not generate explanation. See calculated results above.)"
     llm = next(e for e in body["trace_events"] if e["stage"] == "ai_explanation")
-    assert llm["status"] == "error" and "model crashed" in llm["detail"]
+    # Recorded with its type; the message (which can carry hosts and paths) stays in the server log.
+    assert llm["status"] == "error" and "RuntimeError" in llm["detail"]
+    assert "model crashed" not in str(body)
     check = next(e for e in body["trace_events"] if e["stage"] == "citation_check")
     assert check["status"] == "skipped"
     assert body["cited_chunks"] == []
@@ -229,7 +231,7 @@ def test_deleting_a_conversation_removes_transcript_and_agent_state(client, conv
 
 def test_policy_ask_answers_from_retrieved_chunks(client, review_agent):
     review_agent.reply = "Refund eligibility can change the total cost [Chunk 8]."
-    body = client.post("/policy/ask", json={"question": "Can I get a refund?"}).json()
+    body = client.post("/policy/ask", json={"question": "Can I get a refund?"}, headers=fresh_session(client)).json()
 
     assert body["answered_from_policy"] is True
     assert [e["chunk"] for e in body["evidence"]] == [8, 1]
@@ -239,7 +241,7 @@ def test_policy_ask_answers_from_retrieved_chunks(client, review_agent):
 
 
 def test_policy_ask_without_relevant_text_does_not_call_the_model(client, review_agent):
-    body = client.post("/policy/ask", json={"question": "What is the capital of France?"}).json()
+    body = client.post("/policy/ask", json={"question": "What is the capital of France?"}, headers=fresh_session(client)).json()
 
     assert body["answered_from_policy"] is False and body["evidence"] == []
     assert "doesn't contain information" in body["answer"]
@@ -249,7 +251,7 @@ def test_policy_ask_without_relevant_text_does_not_call_the_model(client, review
 
 def test_policy_ask_flags_invented_citations(client, review_agent):
     review_agent.reply = "Taxes may apply [Chunk 4] and refunds are guaranteed [Chunk 9]."
-    body = client.post("/policy/ask", json={"question": "Are taxes included?"}).json()
+    body = client.post("/policy/ask", json={"question": "Are taxes included?"}, headers=fresh_session(client)).json()
     assert body["cited_chunks"] == [4] and body["unsupported_citations"] == [9]
     assert body["trace_events"][-1]["status"] == "warning"
 
@@ -259,7 +261,7 @@ def test_policy_endpoints_report_a_missing_vector_store(client):
     from backend.main import app
 
     app.dependency_overrides[get_store] = lambda: None
-    response = client.post("/policy/ask", json={"question": "refund?"})
+    response = client.post("/policy/ask", json={"question": "refund?"}, headers=fresh_session(client))
     assert response.status_code == 503 and response.json()["detail"]["error"] == "Vectorstore unavailable"
     status = client.get("/policy/status").json()
     assert status["available"] is False and status["indexed_chunks"] == 0
@@ -272,5 +274,6 @@ def test_policy_retrieval_failure_is_a_502(client, monkeypatch):
     broken = FakeStore()
     broken.similarity_search_with_relevance_scores = lambda q, k=3: (_ for _ in ()).throw(RuntimeError("embed failed"))
     app.dependency_overrides[get_store] = lambda: broken
-    response = client.post("/policy/ask", json={"question": "refund?"})
-    assert response.status_code == 502 and "embed failed" in response.json()["detail"]["message"]
+    response = client.post("/policy/ask", json={"question": "refund?"}, headers=fresh_session(client))
+    assert response.status_code == 502 and response.json()["detail"]["error"] == "Policy search failed"
+    assert "embed failed" not in response.text

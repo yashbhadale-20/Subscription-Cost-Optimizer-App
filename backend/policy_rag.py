@@ -11,6 +11,7 @@ writes to the vector store. Answers are checked after generation:
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import asdict, dataclass
 from functools import lru_cache
@@ -18,6 +19,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from backend.config import settings
+
+logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "subscription_policy"
 POLICY_FILE = "subscription_policy.txt"
@@ -144,7 +147,17 @@ def index_status(store: Any) -> dict[str, Any]:
             "stale_chunks": [],
             "missing_chunks": sorted(current),
         }
-    data = store._collection.get(include=["metadatas", "documents"])
+    try:
+        data = store._collection.get(include=["metadatas", "documents"])
+    except Exception as exc:
+        logger.warning("Could not read the vector index: %s", exc)
+        return {
+            "available": False,
+            "indexed_chunks": 0,
+            "file_chunks": len(current),
+            "stale_chunks": [],
+            "missing_chunks": sorted(current),
+        }
     stored = {
         int((meta or {}).get("chunk", 0) or 0): (doc or "").strip()
         for meta, doc in zip(data.get("metadatas") or [], data.get("documents") or [])

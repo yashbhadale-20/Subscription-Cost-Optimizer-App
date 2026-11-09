@@ -21,6 +21,7 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.Gavel
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
@@ -48,6 +49,7 @@ import com.subscriptionoptimizer.app.domain.UsageLimitEntry
 import com.subscriptionoptimizer.app.ui.designsystem.components.FormTextField
 import com.subscriptionoptimizer.app.ui.designsystem.components.SectionCard
 import com.subscriptionoptimizer.app.ui.designsystem.components.SwitchRow
+import com.subscriptionoptimizer.app.ui.designsystem.components.isTextTight
 import com.subscriptionoptimizer.app.ui.designsystem.theme.Spacing
 
 /** Callbacks for editing one plan; keeps [PlanFormSection]'s signature manageable. */
@@ -194,17 +196,30 @@ fun PlanFormSection(
     }
 }
 
-private fun BillingCycle.periodNoun(): String = when (this) {
+internal fun BillingCycle.periodNoun(): String = when (this) {
     BillingCycle.MONTHLY -> "month"
     BillingCycle.QUARTERLY -> "quarter"
     BillingCycle.SEMI_ANNUAL -> "6 months"
     BillingCycle.ANNUAL -> "year"
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun BillingCycleSelector(selected: BillingCycle, onSelect: (BillingCycle) -> Unit) {
+internal fun BillingCycleSelector(selected: BillingCycle, onSelect: (BillingCycle) -> Unit) {
     val cycles = BillingCycle.entries
+    if (isTextTight()) {
+        // Four segments can't hold these labels ("Mo…", "Qua…"), so let them wrap as chips.
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            cycles.forEach { cycle ->
+                FilterChip(
+                    selected = cycle == selected,
+                    onClick = { onSelect(cycle) },
+                    label = { Text(cycle.label) },
+                )
+            }
+        }
+        return
+    }
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         cycles.forEachIndexed { index, cycle ->
             SegmentedButton(

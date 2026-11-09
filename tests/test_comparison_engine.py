@@ -710,4 +710,13 @@ if failed > 0:
         if status == "FAIL":
             print(f"  ✗ {name}" + (f"  ({detail})" if detail else ""))
 
-sys.exit(1 if failed > 0 else 0)
+
+
+def test_all_engine_checks_pass():
+    # The checks above run at import; this lets pytest collect and report them.
+    failures = [f"{name} ({detail})" for status, name, detail in results if status == "FAIL"]
+    assert not failures, failures
+
+
+if __name__ == "__main__":
+    sys.exit(1 if failed > 0 else 0)

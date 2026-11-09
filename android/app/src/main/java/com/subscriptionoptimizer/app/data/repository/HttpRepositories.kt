@@ -5,6 +5,12 @@ import com.subscriptionoptimizer.app.data.model.ChatReply
 import com.subscriptionoptimizer.app.data.model.CompareRequest
 import com.subscriptionoptimizer.app.data.model.ConnectionTestResult
 import com.subscriptionoptimizer.app.data.model.ConversationSummary
+import com.subscriptionoptimizer.app.data.model.OptimizationSummary
+import com.subscriptionoptimizer.app.data.model.OptimizeRequest
+import com.subscriptionoptimizer.app.data.model.Portfolio
+import com.subscriptionoptimizer.app.data.model.SavedOptimization
+import com.subscriptionoptimizer.app.data.model.Subscription
+import com.subscriptionoptimizer.app.data.remote.PortfolioRequestDto
 import com.subscriptionoptimizer.app.data.model.PolicyAnswer
 import com.subscriptionoptimizer.app.data.model.PolicyIndexStatus
 import com.subscriptionoptimizer.app.data.model.Priority
@@ -38,7 +44,7 @@ class HttpComparisonRepository(private val sessions: SessionManager) : Compariso
         sessions.call(CallProfile.LLM) { auth, userId ->
             // The backend only accepts the session's own user ID.
             val sent = request.copy(userId = userId)
-            compare(auth, sent.toDto()).toSaved(sent) { "unsaved-" + UUID.randomUUID() }
+            compare(auth, sent.toDto()).toSaved(sent) { HttpHistoryRepository.UNSAVED_PREFIX + UUID.randomUUID() }
         }
 }
 
@@ -102,6 +108,10 @@ class HttpHistoryRepository(
     override suspend fun get(id: String): Result<SavedComparison> {
         resetIfOwnerChanged()
         synchronized(cache) { cache[id] }?.let { return Result.success(it) }
+        // Results the backend couldn't save exist only in this session's cache.
+        if (id.startsWith(UNSAVED_PREFIX)) {
+            return Result.failure(RepositoryError.NotFound("This result was never saved and is no longer available."))
+        }
         return sessions.call(CallProfile.QUICK) { auth, _ -> historyItem(auth, id).toDomain() }
             .onSuccess { saved -> synchronized(cache) { cache[saved.id] = saved } }
     }
@@ -132,8 +142,74 @@ class HttpHistoryRepository(
                 _state.update { it.copy(entries = emptyList(), total = 0) }
             }
 
-    private companion object {
-        const val PAGE_SIZE = 50
+    companion object {
+        private const val PAGE_SIZE = 50
+        const val UNSAVED_PREFIX = "unsaved-"
+    }
+}
+
+class HttpOptimizeRepository(
+    private val sessions: SessionManager,
+    private val settings: SettingsRepository,
+) : OptimizeRepository {
+
+    /** Runs fetched or created this session, including results the backend couldn't save. */
+    private val cache = mutableMapOf<String, SavedOptimization>()
+    private var owner: String? = null
+
+    private suspend fun resetIfOwnerChanged() {
+        val now = settings.settings.first().let { "${it.backendUrl}|${it.userId}" }
+        synchronized(cache) {
+            if (owner != now) {
+                owner = now
+                cache.clear()
+            }
+        }
+    }
+
+    override suspend fun optimize(request: OptimizeRequest): Result<SavedOptimization> {
+        resetIfOwnerChanged()
+        return sessions.call(CallProfile.OPTIMIZE) { auth, userId ->
+            val sent = request.copy(userId = userId)
+            optimize(auth, sent.toDto()).toSaved(sent) { UNSAVED_PREFIX + UUID.randomUUID() }
+        }.onSuccess { saved -> synchronized(cache) { cache[saved.id] = saved } }
+    }
+
+    override suspend fun list(): Result<List<OptimizationSummary>> {
+        resetIfOwnerChanged()
+        return sessions.call(CallProfile.QUICK) { auth, _ -> optimizations(auth, limit = PAGE_SIZE).items.map { it.toDomain() } }
+    }
+
+    override suspend fun get(id: String): Result<SavedOptimization> {
+        resetIfOwnerChanged()
+        synchronized(cache) { cache[id] }?.let { return Result.success(it) }
+        if (id.startsWith(UNSAVED_PREFIX)) {
+            return Result.failure(RepositoryError.NotFound("This result was never saved and is no longer available."))
+        }
+        return sessions.call(CallProfile.QUICK) { auth, _ -> optimization(auth, id).toDomain() }
+            .onSuccess { saved -> synchronized(cache) { cache[saved.id] = saved } }
+    }
+
+    override suspend fun trace(id: String): Result<List<TraceEvent>> {
+        synchronized(cache) { cache[id] }?.takeIf { !it.isSaved }?.let { return Result.success(it.result.traceEvents) }
+        return sessions.call(CallProfile.QUICK) { auth, _ -> optimizationTrace(auth, id).events.map { it.toDomain() } }
+    }
+
+    override suspend fun delete(id: String): Result<Unit> =
+        sessions.call(CallProfile.QUICK) { auth, _ -> deleteOptimization(auth, id) }
+            .onSuccess { synchronized(cache) { cache.remove(id) } }
+
+    override suspend fun portfolio(): Result<Portfolio> =
+        sessions.call(CallProfile.QUICK) { auth, _ -> portfolio(auth).toDomain() }
+
+    override suspend fun savePortfolio(subscriptions: List<Subscription>): Result<Portfolio> =
+        sessions.call(CallProfile.QUICK) { auth, _ ->
+            savePortfolio(auth, PortfolioRequestDto(subscriptions.map { it.toDto() })).toDomain()
+        }
+
+    companion object {
+        private const val PAGE_SIZE = 50
+        const val UNSAVED_PREFIX = "unsaved-"
     }
 }
 
@@ -148,13 +224,12 @@ class HttpPreferencesRepository(private val sessions: SessionManager) : Preferen
 }
 
 class HttpPolicyRepository(
+    private val sessions: SessionManager,
     private val client: BackendClient,
     private val settings: SettingsRepository,
 ) : PolicyRepository {
     override suspend fun ask(question: String): Result<PolicyAnswer> =
-        client.call(settings.settings.first().backendUrl, CallProfile.LLM) {
-            askPolicy(PolicyAskRequestDto(question)).toDomain()
-        }
+        sessions.call(CallProfile.LLM) { auth, _ -> askPolicy(auth, PolicyAskRequestDto(question)).toDomain() }
 
     override suspend fun status(): Result<PolicyIndexStatus> =
         client.call(settings.settings.first().backendUrl, CallProfile.QUICK) { policyStatus().toDomain() }

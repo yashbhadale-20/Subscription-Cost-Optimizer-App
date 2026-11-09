@@ -408,7 +408,7 @@ private fun PlanCostCard(cost: CostBreakdown, recommended: Boolean, modifier: Mo
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         KeyValueRow("First-year cost", Formatters.money(cost.firstYearCost), emphasize = true)
         Explanation(cost.firstYearExplanation)
-        KeyValueRow("Yearly from year two", Formatters.money(cost.recurringAnnualCost), emphasize = true)
+        KeyValueRow("Yearly, after offers", Formatters.money(cost.recurringAnnualCost), emphasize = true)
         Explanation(cost.recurringAnnualExplanation)
         cost.renewalCostNote?.takeIf { it.isNotBlank() }?.let {
             Explanation("Renewal: $it")

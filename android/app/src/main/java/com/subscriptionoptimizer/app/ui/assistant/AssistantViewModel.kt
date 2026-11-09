@@ -86,6 +86,7 @@ class AssistantViewModel(
         request(message)
     }
 
+    /** A reply still in flight for the old thread is dropped when it arrives (see [request]). */
     fun newConversation() {
         _uiState.update { AssistantUiState(conversations = it.conversations.copy(visible = false)) }
     }
@@ -113,7 +114,7 @@ class AssistantViewModel(
         _uiState.update {
             it.copy(
                 threadId = threadId, messages = emptyList(), error = null, notice = null,
-                isLoadingThread = true, threadError = null,
+                isSending = false, isLoadingThread = true, threadError = null,
                 conversations = it.conversations.copy(visible = false),
             )
         }
@@ -158,6 +159,9 @@ class AssistantViewModel(
                         unsupportedCitations = reply.unsupportedCitations,
                     )
                     _uiState.update {
+                        // The user may have switched threads while waiting; the reply is saved on
+                        // the server under its own thread and must not appear in another one.
+                        if (it.threadId != threadId) return@update it
                         it.copy(
                             messages = it.messages + answer,
                             isSending = false,
@@ -173,6 +177,7 @@ class AssistantViewModel(
                 .onFailure { e ->
                     val error = e.asRepositoryError()
                     _uiState.update {
+                        if (it.threadId != threadId) return@update it
                         it.copy(
                             isSending = false,
                             error = ChatError(

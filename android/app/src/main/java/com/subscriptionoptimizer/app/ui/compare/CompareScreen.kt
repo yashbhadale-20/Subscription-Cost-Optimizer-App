@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.QuestionAnswer
 import androidx.compose.material.icons.outlined.RestartAlt
+import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
@@ -106,6 +107,7 @@ fun CompareRoute(
         onReset = viewModel::reset,
         onDismissError = viewModel::dismissSubmitError,
         onOpenSettings = onOpenSettings,
+        onSwap = viewModel::swapPlans,
     )
 }
 
@@ -121,6 +123,7 @@ fun CompareScreen(
     onReset: () -> Unit,
     onDismissError: () -> Unit,
     onOpenSettings: () -> Unit,
+    onSwap: () -> Unit = {},
 ) {
     var confirmReset by rememberSaveable { mutableStateOf(false) }
     var selectedSlot by rememberSaveable { mutableStateOf(PlanSlot.A) }
@@ -128,6 +131,9 @@ fun CompareScreen(
     Scaffold(
         topBar = {
             AppTopBar(title = "Compare plans") {
+                IconButton(onClick = onSwap, enabled = !state.isSubmitting) {
+                    Icon(Icons.Outlined.SwapVert, contentDescription = "Swap Plan A and Plan B")
+                }
                 IconButton(onClick = { confirmReset = true }) {
                     Icon(Icons.Outlined.RestartAlt, contentDescription = "Clear form")
                 }

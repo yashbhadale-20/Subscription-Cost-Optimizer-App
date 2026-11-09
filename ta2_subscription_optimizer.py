@@ -27,6 +27,12 @@ CHROMA_DIR = ROOT / "chroma_db"
 TRACE_DIR = ROOT / "traces"
 
 MAX_HOPS = 3
+# Five tool calls at two graph steps each, plus the final answer, fit well inside this.
+AGENT_RECURSION_LIMIT = 15
+# The API gives up on a model call after 180 s, but that only abandons the worker thread.
+# These client timeouts are what actually end it, so a hung Ollama can't use up the thread pool.
+OLLAMA_CLIENT_TIMEOUT_SECONDS = 190
+OLLAMA_EMBED_TIMEOUT_SECONDS = 45
 INJECT_FAILURE = False
 
 
@@ -162,7 +168,10 @@ def load_corpus():
 
 def get_vectorstore():
     try:
-        embeddings = OllamaEmbeddings(model="nomic-embed-text")
+        embeddings = OllamaEmbeddings(
+            model="nomic-embed-text",
+            client_kwargs={"timeout": OLLAMA_EMBED_TIMEOUT_SECONDS},
+        )
         docs = load_corpus()
         CHROMA_DIR.mkdir(parents=True, exist_ok=True)
         store = Chroma(
@@ -178,7 +187,11 @@ def get_vectorstore():
         return None
 
 
-model = ChatOllama(model="qwen2.5:3b", temperature=0)
+model = ChatOllama(
+    model="qwen2.5:3b",
+    temperature=0,
+    client_kwargs={"timeout": OLLAMA_CLIENT_TIMEOUT_SECONDS},
+)
 
 calculator_agent = create_agent(
     model=model,
@@ -295,7 +308,8 @@ def run_supervisor(
             )
             try:
                 result = calculator_agent.invoke(
-                    {"messages": [{"role": "user", "content": calc_prompt}]}
+                    {"messages": [{"role": "user", "content": calc_prompt}]},
+                    config={"recursion_limit": AGENT_RECURSION_LIMIT},
                 )
                 calc_result = str(result["messages"][-1].content)
                 trace.append("Price calculations finished.")
@@ -321,7 +335,8 @@ def run_supervisor(
             )
             try:
                 result = review_agent.invoke(
-                    {"messages": [{"role": "user", "content": review_prompt}]}
+                    {"messages": [{"role": "user", "content": review_prompt}]},
+                    config={"recursion_limit": AGENT_RECURSION_LIMIT},
                 )
                 review_result = str(result["messages"][-1].content)
                 trace.append("Policy check finished.")

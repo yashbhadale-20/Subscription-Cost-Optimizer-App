@@ -9,6 +9,7 @@ Raw SQL access and arbitrary namespace writes are not exposed.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -16,11 +17,10 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
+from backend import db
 from backend.config import settings
 from backend.dependencies import current_user, ensure_same_user
 from backend.models import MemoryResponse, MemoryWriteRequest
-
-import ta2_subscription_optimizer as _app
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/memory", tags=["Memory"])
@@ -43,7 +43,12 @@ async def get_memory(
     Empty dict if no data has been saved for this user.
     """
     ensure_same_user(session_user, user_id)
-    profile = _app.recall(user_id, "profile")
+    try:
+        profile = await asyncio.to_thread(db.recall, user_id, "profile")
+    except sqlite3.Error as exc:
+        # An outage must not look like an empty profile.
+        logger.error("Memory read error for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=500, detail={"error": "Memory read failed", "message": "Check the server logs."})
     return MemoryResponse(user_id=user_id, profile=profile)
 
 
@@ -63,12 +68,11 @@ async def set_memory(
     """
     ensure_same_user(session_user, user_id)
     try:
-        _app.remember(user_id, "profile", body.key, body.value)
-    except Exception as exc:
+        await asyncio.to_thread(db.remember, user_id, "profile", body.key, body.value)
+        profile = await asyncio.to_thread(db.recall, user_id, "profile")
+    except sqlite3.Error as exc:
         logger.error("Memory write error for user %s: %s", user_id, exc)
-        raise HTTPException(status_code=500, detail={"error": "Memory write failed", "message": str(exc)})
-
-    profile = _app.recall(user_id, "profile")
+        raise HTTPException(status_code=500, detail={"error": "Memory write failed", "message": "Check the server logs."})
     return MemoryResponse(user_id=user_id, profile=profile)
 
 
@@ -86,9 +90,10 @@ async def get_history(
     ordered by most recently updated, capped at *limit* rows (max 50).
     """
     ensure_same_user(session_user, user_id)
-    try:
-        with sqlite3.connect(settings.db_path) as conn:
-            rows = conn.execute(
+    def _rows() -> list[tuple[Any, ...]]:
+        conn = sqlite3.connect(settings.db_path)
+        try:
+            return conn.execute(
                 """
                 SELECT namespace, memory_key, memory_value, updated_at
                 FROM user_memory
@@ -98,14 +103,20 @@ async def get_history(
                 """,
                 (user_id, limit),
             ).fetchall()
+        finally:
+            conn.close()
+
+    try:
+        rows = await asyncio.to_thread(_rows)
         history = [
             {"namespace": r[0], "key": r[1], "value": r[2], "updated_at": r[3]}
             for r in rows
         ]
     except sqlite3.Error as exc:
+        logger.error("Memory history read error for user %s: %s", user_id, exc)
         raise HTTPException(
             status_code=500,
-            detail={"error": "Database read error", "message": str(exc)},
+            detail={"error": "Database read error", "message": "Check the server logs."},
         )
 
     return {"user_id": user_id, "history": history, "count": len(history)}

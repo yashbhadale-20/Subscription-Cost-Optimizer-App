@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Policy
@@ -26,6 +28,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +50,7 @@ import com.subscriptionoptimizer.app.ui.designsystem.components.AppTopBar
 import com.subscriptionoptimizer.app.ui.designsystem.components.CenteredContent
 import com.subscriptionoptimizer.app.ui.designsystem.components.EmptyState
 import com.subscriptionoptimizer.app.ui.designsystem.components.SectionHeader
+import com.subscriptionoptimizer.app.ui.designsystem.components.isTextTight
 import com.subscriptionoptimizer.app.ui.designsystem.theme.AppTheme
 import com.subscriptionoptimizer.app.ui.designsystem.theme.NumberStyles
 import com.subscriptionoptimizer.app.ui.designsystem.theme.Spacing
@@ -59,9 +63,12 @@ fun HomeRoute(
     onOpenHistory: () -> Unit,
     onOpenPolicy: () -> Unit,
     onOpenResult: (String) -> Unit,
+    onOpenOptimize: () -> Unit = {},
     viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // Each time Home is shown, so a changed user ID or backend URL takes effect.
+    LaunchedEffect(viewModel) { viewModel.refresh() }
     HomeScreen(
         state = state,
         onNewComparison = onNewComparison,
@@ -69,6 +76,7 @@ fun HomeRoute(
         onOpenHistory = onOpenHistory,
         onOpenPolicy = onOpenPolicy,
         onOpenResult = onOpenResult,
+        onOpenOptimize = onOpenOptimize,
     )
 }
 
@@ -80,6 +88,7 @@ fun HomeScreen(
     onOpenHistory: () -> Unit,
     onOpenPolicy: () -> Unit,
     onOpenResult: (String) -> Unit,
+    onOpenOptimize: () -> Unit = {},
 ) {
     Scaffold(topBar = { AppTopBar(title = "Overview") }) { padding ->
         CenteredContent(
@@ -93,7 +102,9 @@ fun HomeScreen(
                     .padding(horizontal = Spacing.gutter, vertical = Spacing.sm),
                 verticalArrangement = Arrangement.spacedBy(Spacing.lg),
             ) {
-                DashboardHero(state.figures, onNewComparison)
+                DashboardHero(state.figures, state.isLoading, state.historyError != null, onNewComparison)
+
+                OptimizeCard(onOpenOptimize)
 
                 SectionHeader("Quick actions")
                 QuickActions(onNewComparison, onOpenAssistant, onOpenHistory, onOpenPolicy)
@@ -108,7 +119,7 @@ fun HomeScreen(
                 )
                 if (state.recent.isEmpty() && state.isLoading) {
                     AppCard { Text("Loading saved comparisons…", style = MaterialTheme.typography.bodyMedium) }
-                } else if (state.recent.isEmpty()) {
+                } else if (state.recent.isEmpty() && state.historyError == null) {
                     AppCard {
                         EmptyState(
                             icon = Icons.Outlined.History,
@@ -135,7 +146,12 @@ fun HomeScreen(
 }
 
 @Composable
-private fun DashboardHero(figures: DashboardFigures?, onNewComparison: () -> Unit) {
+private fun DashboardHero(
+    figures: DashboardFigures?,
+    isLoading: Boolean,
+    loadFailed: Boolean,
+    onNewComparison: () -> Unit,
+) {
     val extended = AppTheme.extendedColors
     val onHero = extended.onHero
     Surface(shape = MaterialTheme.shapes.large, color = Color.Transparent) {
@@ -156,10 +172,12 @@ private fun DashboardHero(figures: DashboardFigures?, onNewComparison: () -> Uni
             )
             Spacer(Modifier.size(Spacing.xs))
             Text(
-                text = if (figures == null) {
-                    "Figures appear after your first comparison."
-                } else {
-                    "Based on your latest comparison: ${figures.planAName} vs ${figures.planBName}"
+                // Without figures, say why: "no comparisons yet" is only true once history has loaded.
+                text = when {
+                    figures != null -> "Based on your latest comparison: ${figures.planAName} vs ${figures.planBName}"
+                    isLoading -> "Loading your latest comparison…"
+                    loadFailed -> "Couldn't load your comparisons. See the message below."
+                    else -> "Figures appear after your first comparison."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = onHero.copy(alpha = 0.85f),
@@ -175,20 +193,34 @@ private fun DashboardHero(figures: DashboardFigures?, onNewComparison: () -> Uni
                 color = onHero,
             )
             Spacer(Modifier.size(Spacing.md))
-            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xl)) {
+            val monthly: @Composable (Modifier) -> Unit = {
                 HeroFigure(
                     label = "Est. monthly cost",
                     value = figures?.monthlyCost?.let(Formatters::money),
                     color = onHero,
-                    modifier = Modifier.weight(1f),
+                    modifier = it,
                 )
+            }
+            val savings: @Composable (Modifier) -> Unit = {
                 HeroFigure(
                     label = "Est. savings (1st year)",
                     value = figures?.estimatedSavings?.let(Formatters::money),
                     color = onHero,
-                    modifier = Modifier.weight(1f),
+                    modifier = it,
                     highlight = figures?.estimatedSavings != null,
                 )
+            }
+            if (isTextTight()) {
+                // Side by side, large text breaks an amount across lines ("₹2,400.0" / "0").
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                    monthly(Modifier)
+                    savings(Modifier)
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xl)) {
+                    monthly(Modifier.weight(1f))
+                    savings(Modifier.weight(1f))
+                }
             }
 
             if (figures != null && figures.recommendedPlanName == null) {
@@ -254,6 +286,35 @@ private fun HeroFigure(
     }
 }
 
+/** Entry point to the optimization agent, which looks at every subscription rather than two plans. */
+@Composable
+private fun OptimizeCard(onClick: () -> Unit) {
+    AppCard(onClick = onClick) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = AppTheme.extendedColors.savingsContainer,
+                contentColor = AppTheme.extendedColors.onSavingsContainer,
+                modifier = Modifier.size(44.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.AutoFixHigh, contentDescription = null, modifier = Modifier.size(24.dp))
+                }
+            }
+            Spacer(Modifier.size(Spacing.md))
+            Column(Modifier.weight(1f)) {
+                Text("Optimize my subscriptions", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Find what to cancel, downgrade or pay yearly across everything you subscribe to.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(Icons.AutoMirrored.Outlined.ArrowForward, contentDescription = null)
+        }
+    }
+}
+
 private data class QuickAction(val label: String, val icon: ImageVector, val onClick: () -> Unit)
 
 @Composable
@@ -270,7 +331,7 @@ private fun QuickActions(
         QuickAction("Policy questions", Icons.Outlined.Policy, onOpenPolicy),
     )
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-        actions.chunked(2).forEach { pair ->
+        actions.chunked(if (isTextTight()) 1 else 2).forEach { pair ->
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
                 pair.forEach { action ->
                     AppCard(onClick = action.onClick, modifier = Modifier.weight(1f)) {

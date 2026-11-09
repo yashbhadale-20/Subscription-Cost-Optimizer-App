@@ -14,7 +14,7 @@ Jetpack Compose (Material 3) client for the FastAPI backend in `../backend`.
 | History (`/history`): saved on the server, survives app restarts, reopens full results | Connected |
 | Execution trace screen (`GET /history/{id}/trace`) | Connected |
 | AI assistant (`POST /chat`) with evidence; saved conversations (`/conversations`) | Connected |
-| Policy questions (`POST /policy/ask`, `GET /policy/status`) | Connected |
+| Policy questions (`POST /policy/ask` with a session, `GET /policy/status`) | Connected |
 | Default comparison priority (`/preferences`), server profile (`/memory`) | Connected |
 
 The first user-scoped call asks the backend for a session token for the configured user ID and
@@ -40,6 +40,9 @@ JDK 25 as `jbr`; with that JDK, `assembleRelease` fails in `lintVitalAnalyzeRele
 cd android
 .\gradlew.bat assembleDebug        # APK in appuild\outputspk\debug.\gradlew.bat testDebugUnitTest    # validation, network layer (MockWebServer) and ViewModel tests
 ```
+
+On a connected emulator or device, `.\gradlew.bat connectedDebugAndroidTest` runs the instrumented
+navigation, validation and form-preservation tests in `src/androidTest` (no backend needed).
 
 ## Connecting to the backend
 
@@ -83,7 +86,12 @@ retrieval. Health and profile calls give up after 15 s.
 | HTTP logging | Method, URL, status, timing (no bodies) | Off |
 
 Before a production deployment, put the backend behind HTTPS (a reverse proxy with a real certificate)
-and add authentication. The backend currently has none, and the app sends no credentials.
+and replace the first-come session scheme with real accounts. Today a user ID belongs to whichever
+client asks for it first, and session tokens don't expire.
+
+Each install generates its own user ID (`android_<random>`). It identifies the install to the backend:
+after a reinstall or Clear Data the token is gone, so the old ID answers 409 and that history can't be
+reached from the device. An install that already held a session as `android_user` keeps that ID.
 
 ## Structure
 

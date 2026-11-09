@@ -12,6 +12,7 @@ for discount calculation, annual cost, and plan comparison.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -65,6 +66,11 @@ def apply_discount(monthly_price: float, discount_percent: float) -> float:
     return round(monthly_price * (1 - discount_percent / 100), 2)
 
 
+def _rounding_note(monthly: float, months: int, total: float) -> str:
+    """Flag explanations whose displayed monthly figure was rounded (e.g. ₹1999/year ÷ 12)."""
+    return " (monthly figure rounded)" if abs(round(monthly, 2) * months - total) >= 0.005 else ""
+
+
 def compute_first_year_cost(
     monthly_price: float,
     discount: DiscountInfo,
@@ -72,16 +78,23 @@ def compute_first_year_cost(
     """
     Calculate first-year cost accounting for introductory period expiry.
 
+    ``monthly_price`` may carry more than two decimals (an annual price divided
+    by 12); totals are computed from it and rounded once, so ₹1999/year costs
+    ₹1999.00, not 12 × ₹166.58 = ₹1998.96.
+
     Returns (cost, explanation_string).
     """
-    discounted_monthly = apply_discount(monthly_price, discount.percent)
+    apply_discount(monthly_price, discount.percent)  # validates the inputs
+    discounted_exact = monthly_price * (1 - discount.percent / 100)
+    discounted_monthly = round(discounted_exact, 2)
 
     if discount.intro_months is None:
         # Ongoing discount — full 12 months at discounted rate
-        cost = round(discounted_monthly * 12, 2)
+        cost = round(discounted_exact * 12, 2)
         explanation = (
             f"12 months × ₹{discounted_monthly:.2f} = ₹{cost:.2f} "
             f"(ongoing {discount.percent:.1f}% discount)"
+            + _rounding_note(discounted_exact, 12, cost)
         )
         return cost, explanation
 
@@ -95,13 +108,12 @@ def compute_first_year_cost(
         # After intro, revert to the original price
         post_price = monthly_price
 
-    intro_cost = round(discounted_monthly * intro, 2)
-    remaining_cost = round(post_price * remaining, 2)
-    total = round(intro_cost + remaining_cost, 2)
+    total = round(discounted_exact * intro + post_price * remaining, 2)
 
     explanation = (
         f"{intro} months × ₹{discounted_monthly:.2f} (intro) + "
         f"{remaining} months × ₹{post_price:.2f} (regular) = ₹{total:.2f}"
+        + _rounding_note(discounted_exact, intro, total - post_price * remaining)
     )
     return total, explanation
 
@@ -114,17 +126,23 @@ def compute_recurring_annual_cost(
     Calculate cost for year 2+ (post-intro if applicable).
     """
     if discount.intro_months is not None:
-        # Intro expired — use post-intro or full price
-        post_price = discount.post_intro_price or monthly_price
+        # Intro expired — use post-intro or full price. A post-intro price of 0 is a
+        # real price (free after the offer), so test for None, not falsiness.
+        post_price = discount.post_intro_price if discount.post_intro_price is not None else monthly_price
         cost = round(post_price * 12, 2)
-        explanation = f"12 months × ₹{post_price:.2f} (post-intro rate) = ₹{cost:.2f}"
+        explanation = (
+            f"12 months × ₹{post_price:.2f} (post-intro rate) = ₹{cost:.2f}"
+            + _rounding_note(post_price, 12, cost)
+        )
     else:
         # Ongoing discount
-        discounted = apply_discount(monthly_price, discount.percent)
+        apply_discount(monthly_price, discount.percent)  # validates the inputs
+        discounted = monthly_price * (1 - discount.percent / 100)
         cost = round(discounted * 12, 2)
         explanation = (
             f"12 months × ₹{discounted:.2f} "
             f"(ongoing {discount.percent:.1f}% discount) = ₹{cost:.2f}"
+            + _rounding_note(discounted, 12, cost)
         )
     return cost, explanation
 
@@ -229,6 +247,68 @@ def _features_score(feature_count: int, other_count: int) -> float:
     return round((feature_count / total) * 100, 1)
 
 
+_FLEXIBLE_TERMS = re.compile(r"\b(?:free|anytime|no fee|no penalty|flexible)\b")
+_NEGATORS = {"no", "not", "non", "never", "without", "isn't", "isnt", "cannot", "can't"}
+
+
+def _flexible_cancellation(terms: str) -> bool:
+    """
+    True if the terms promise flexible cancellation. A match preceded within two words by a
+    negation ("No free cancellation", "not cancellable anytime") doesn't count.
+    """
+    low = terms.lower()
+    for match in _FLEXIBLE_TERMS.finditer(low):
+        preceding = re.findall(r"[a-z']+", low[: match.start()])[-2:]
+        if not _NEGATORS.intersection(preceding):
+            return True
+    return False
+
+
+_LIMIT_VALUE = re.compile(r"^(\d+(?:\.\d+)?)\s*([a-z]*)$")
+_UNLIMITED = {"unlimited", "infinite", "no limit", "∞"}
+_DATA_UNITS = {"kb": 1 / 1024 ** 2, "mb": 1 / 1024, "gb": 1.0, "tb": 1024.0}
+
+
+def _parse_limit(value: Any) -> tuple[float, str] | None:
+    """(amount, unit) for a usage limit such as 4, "4", "100 GB" or "unlimited"; None if it isn't one."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value), ""
+    text = str(value).strip().lower()
+    if text in _UNLIMITED:
+        return math.inf, ""
+    match = _LIMIT_VALUE.match(text)
+    return (float(match.group(1)), match.group(2)) if match else None
+
+
+def _limit_share(a: Any, b: Any) -> float:
+    """Plan A's share (0–1) of one shared limit, higher being better. 0.5 when not comparable."""
+    left, right = _parse_limit(a), _parse_limit(b)
+    if left is None or right is None:
+        return 0.5
+    if math.isinf(left[0]) or math.isinf(right[0]):
+        return 0.5 if left[0] == right[0] else (1.0 if math.isinf(left[0]) else 0.0)
+    amount_a, amount_b = left[0], right[0]
+    if left[1] != right[1]:
+        if left[1] not in _DATA_UNITS or right[1] not in _DATA_UNITS:
+            return 0.5
+        amount_a, amount_b = amount_a * _DATA_UNITS[left[1]], amount_b * _DATA_UNITS[right[1]]
+    total = amount_a + amount_b
+    return amount_a / total if total > 0 else 0.5
+
+
+def _usage_scores(limits_a: dict[str, Any], limits_b: dict[str, Any]) -> tuple[float, float] | None:
+    """Scores from the limits both plans state; None if they have none in common."""
+    a = {str(k).strip().lower(): v for k, v in limits_a.items()}
+    b = {str(k).strip().lower(): v for k, v in limits_b.items()}
+    shared = a.keys() & b.keys()
+    if not shared:
+        return None
+    share = sum(_limit_share(a[k], b[k]) for k in shared) / len(shared)
+    return round(share * 100, 1), round((1 - share) * 100, 1)
+
+
 def compute_scores(
     plan_a_annual: float,
     plan_b_annual: float,
@@ -255,33 +335,25 @@ def compute_scores(
     cost_a = _cost_score_from_prices(plan_a_annual, plan_b_annual, max_price)
     cost_b = _cost_score_from_prices(plan_b_annual, plan_a_annual, max_price)
 
-    # Feature scores
-    fa = features_a or []
-    fb = features_b or []
-    feat_a = _features_score(len(fa), len(fb))
-    feat_b = _features_score(len(fb), len(fa))
+    # Feature scores, on distinct features (as compare_features counts them), so
+    # ["HD", "hd", " HD "] counts once and can't outscore a plan with two real features.
+    fa = {f.strip().lower() for f in (features_a or []) if f.strip()}
+    fb = {f.strip().lower() for f in (features_b or []) if f.strip()}
+    # A plan with no features listed is unknown, not featureless, so it isn't scored against.
+    features_known = bool(fa) and bool(fb)
+    feat_a = _features_score(len(fa), len(fb)) if features_known else 50.0
+    feat_b = _features_score(len(fb), len(fa)) if features_known else 50.0
 
     # Usage score — only if both plans provide usage limits
-    has_usage = bool(usage_limits_a) and bool(usage_limits_b)
-    if has_usage:
-        # Simple heuristic: count of limits provided as a proxy
-        ua_count = len(usage_limits_a or {})
-        ub_count = len(usage_limits_b or {})
-        total_u = ua_count + ub_count or 1
-        usage_a = round((ua_count / total_u) * 100, 1)
-        usage_b = round((ub_count / total_u) * 100, 1)
-    else:
-        usage_a = None
-        usage_b = None
+    usage = _usage_scores(usage_limits_a or {}, usage_limits_b or {})
+    usage_a, usage_b = usage if usage else (None, None)
 
     # Cancellation score — only if both plans provide terms
     has_cancel = bool(cancellation_a) and bool(cancellation_b)
     if has_cancel:
-        # If we have text, each gets 50 until LLM-based analysis.
-        # We give "free cancellation" keywords a bonus.
-        free_keywords = ["free", "anytime", "no fee", "no penalty", "flexible"]
-        cancel_a = 70.0 if any(k in (cancellation_a or "").lower() for k in free_keywords) else 40.0
-        cancel_b = 70.0 if any(k in (cancellation_b or "").lower() for k in free_keywords) else 40.0
+        # "Free cancellation"-style terms get a bonus.
+        cancel_a = 70.0 if _flexible_cancellation(cancellation_a or "") else 40.0
+        cancel_b = 70.0 if _flexible_cancellation(cancellation_b or "") else 40.0
     else:
         cancel_a = None
         cancel_b = None
@@ -317,6 +389,8 @@ def compute_scores(
 
     total_a, suff_a = _weighted(cost_a, feat_a, usage_a, cancel_a)
     total_b, suff_b = _weighted(cost_b, feat_b, usage_b, cancel_b)
+    suff_a = suff_a and features_known
+    suff_b = suff_b and features_known
 
     score_a = ScoreBreakdown(
         cost_score=cost_a,
@@ -399,10 +473,14 @@ def _build_cost_breakdown(
     renewal_note: str | None,
 ) -> CostBreakdown:
     """Build the full cost breakdown for one plan."""
-    monthly_eq = to_monthly(listed_price, billing_cycle)
+    if listed_price < 0:
+        raise ValueError("Price cannot be negative.")
+    # Exact monthly price for the totals; the rounded one is only for display.
+    monthly_exact = listed_price / billing_cycle.months
+    monthly_eq = round(monthly_exact, 2)
     discounted_monthly = apply_discount(monthly_eq, discount.percent)
-    first_year, fy_explanation = compute_first_year_cost(monthly_eq, discount)
-    recurring, rec_explanation = compute_recurring_annual_cost(monthly_eq, discount)
+    first_year, fy_explanation = compute_first_year_cost(monthly_exact, discount)
+    recurring, rec_explanation = compute_recurring_annual_cost(monthly_exact, discount)
 
     return CostBreakdown(
         plan_name=name,
@@ -439,6 +517,13 @@ def _compute_savings(cost_a: float, cost_b: float) -> tuple[float, float, str]:
         return 0.0, 0.0, "tie"
 
 
+# Priorities under which a cheaper plan is preferred unless the pricier one wins by a wide margin.
+_COST_PRIORITIES = (UserPriority.LOWEST_COST, UserPriority.STUDENT_BUDGET)
+_COST_OVERRIDE_GAP = 15.0
+# 12 months × up to half a paisa of rounding in the displayed monthly price.
+_DISPLAY_ROUNDING_TOLERANCE = 0.07
+
+
 def _verify_consistency(
     cost_a: CostBreakdown,
     cost_b: CostBreakdown,
@@ -446,12 +531,22 @@ def _verify_consistency(
     reason: str,
     score_a: ScoreBreakdown | None,
     score_b: ScoreBreakdown | None,
+    priority: UserPriority | None = None,
 ) -> tuple[bool, list[str]]:
     """
     Verify that the recommendation is consistent with the calculated numbers.
     Returns (passed, notes).
     """
     notes: list[str] = []
+
+    # Under cost-focused priorities _determine_recommendation deliberately picks the
+    # cheaper plan when the pricier one wins on score by less than the override gap.
+    def _cost_override(recommended: CostBreakdown, other: CostBreakdown, gap: float) -> bool:
+        return (
+            priority in _COST_PRIORITIES
+            and recommended.first_year_cost < other.first_year_cost
+            and gap < _COST_OVERRIDE_GAP
+        )
 
     # Verify discounted price is less than or equal to listed price
     if cost_a.discounted_monthly > cost_a.monthly_equivalent + 0.01:
@@ -467,12 +562,15 @@ def _verify_consistency(
 
     # Cross-check: if recommendation is plan_a, plan_a should have higher score
     if score_a and score_b:
-        if recommendation == Recommendation.PLAN_A and score_b.weighted_total > score_a.weighted_total + 0.5:
+        gap = abs(score_a.weighted_total - score_b.weighted_total)
+        if (recommendation == Recommendation.PLAN_A and score_b.weighted_total > score_a.weighted_total + 0.5
+                and not _cost_override(cost_a, cost_b, gap)):
             notes.append(
                 f"Recommendation is Plan A but Plan B scores higher "
                 f"({score_b.weighted_total} > {score_a.weighted_total})"
             )
-        if recommendation == Recommendation.PLAN_B and score_a.weighted_total > score_b.weighted_total + 0.5:
+        if (recommendation == Recommendation.PLAN_B and score_a.weighted_total > score_b.weighted_total + 0.5
+                and not _cost_override(cost_b, cost_a, gap)):
             notes.append(
                 f"Recommendation is Plan B but Plan A scores higher "
                 f"({score_a.weighted_total} > {score_b.weighted_total})"
@@ -481,14 +579,14 @@ def _verify_consistency(
     # Verify annual cost = monthly * 12 for non-intro plans
     if not cost_a.has_intro_offer:
         expected = round(cost_a.discounted_monthly * 12, 2)
-        if abs(cost_a.first_year_cost - expected) > 0.02:
+        if abs(cost_a.first_year_cost - expected) > _DISPLAY_ROUNDING_TOLERANCE:
             notes.append(
                 f"Plan A first-year ₹{cost_a.first_year_cost} != "
                 f"₹{cost_a.discounted_monthly} × 12 = ₹{expected}"
             )
     if not cost_b.has_intro_offer:
         expected = round(cost_b.discounted_monthly * 12, 2)
-        if abs(cost_b.first_year_cost - expected) > 0.02:
+        if abs(cost_b.first_year_cost - expected) > _DISPLAY_ROUNDING_TOLERANCE:
             notes.append(
                 f"Plan B first-year ₹{cost_b.first_year_cost} != "
                 f"₹{cost_b.discounted_monthly} × 12 = ₹{expected}"
@@ -582,6 +680,14 @@ def run_comparison(
         assumptions.append("Introductory pricing reverts to regular rate after the stated period.")
     if plan_a_billing != BillingCycle.MONTHLY or plan_b_billing != BillingCycle.MONTHLY:
         assumptions.append("Non-monthly prices were converted to monthly equivalents for comparison.")
+    for cost in (cost_a, cost_b):
+        if cost.intro_months is not None and cost.intro_months > 12:
+            assumptions.append(
+                f"{cost.plan_name}'s offer lasts {cost.intro_months} months, so its recurring cost "
+                f"applies only after month {cost.intro_months}, not from the second year."
+            )
+    if plan_a_usage_limits and plan_b_usage_limits:
+        assumptions.append("Usage limits both plans state are compared by value, with higher treated as better.")
 
     # ── Scoring ────────────────────────────────────────────────────────────
     score_a, score_b = compute_scores(
@@ -600,10 +706,17 @@ def run_comparison(
         abs_fy, cheaper_fy,
     )
 
+    # The recommendation is based on first-year cost, so say so when that stops being the cheaper plan.
+    if "tie" not in (cheaper_fy, cheaper_rec) and cheaper_fy != cheaper_rec:
+        reason += (
+            f" {cheaper_fy_name} is cheaper in the first year, but "
+            f"{cheaper_rec_name} costs ₹{abs_rec:.2f} less each year after that."
+        )
+
     # ── Verification ───────────────────────────────────────────────────────
     verified, v_notes = _verify_consistency(
         cost_a, cost_b, recommendation, reason,
-        score_a, score_b,
+        score_a, score_b, priority,
     )
 
     return ComparisonResult(
@@ -650,6 +763,18 @@ def _determine_recommendation(
 
     # Tie threshold
     if abs(diff) <= 2.0:
+        # Close scores don't make a cheaper plan a tie for someone who asked for the lowest cost.
+        if priority in _COST_PRIORITIES and cost_a.first_year_cost != cost_b.first_year_cost:
+            a_cheaper = cost_a.first_year_cost < cost_b.first_year_cost
+            cheaper_cost = cost_a if a_cheaper else cost_b
+            return (
+                Recommendation.PLAN_A if a_cheaper else Recommendation.PLAN_B,
+                f"{cheaper_cost.plan_name} is recommended: it costs "
+                f"₹{abs(cost_a.first_year_cost - cost_b.first_year_cost):.2f} less in the first year "
+                f"and the plans otherwise score within 2 points "
+                f"(A: {score_a.weighted_total}, B: {score_b.weighted_total}) "
+                f"under the '{priority.value}' priority."
+            )
         return (
             Recommendation.TIE,
             f"Both plans score within 2 points of each other "
@@ -669,11 +794,11 @@ def _determine_recommendation(
 
     # Safety check: under cost-focused priorities, don't recommend more expensive
     # unless the score difference is substantial and justified.
-    if priority in (UserPriority.LOWEST_COST, UserPriority.STUDENT_BUDGET):
+    if priority in _COST_PRIORITIES:
         if winner_cost > loser_cost:
             # More expensive plan wins on score — switch to cheaper unless
             # the score gap is very large (>15 points) indicating clear value
-            if abs(diff) < 15.0:
+            if abs(diff) < _COST_OVERRIDE_GAP:
                 return (
                     Recommendation.PLAN_A if cost_a.first_year_cost <= cost_b.first_year_cost else Recommendation.PLAN_B,
                     f"Under the '{priority.value}' priority, {loser_name} is recommended "

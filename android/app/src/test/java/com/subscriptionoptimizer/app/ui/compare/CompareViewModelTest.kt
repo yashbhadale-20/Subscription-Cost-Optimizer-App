@@ -88,6 +88,46 @@ class CompareViewModelTest {
     }
 
     @Test
+    fun `swapping exchanges the plans and is undone by swapping again`() {
+        val vm = viewModel(ControlledRepository())
+        vm.fillValidForm()
+        val a = vm.uiState.value.planA.form
+        val b = vm.uiState.value.planB.form
+
+        vm.swapPlans()
+        assertEquals(b, vm.uiState.value.planA.form)
+        assertEquals(a, vm.uiState.value.planB.form)
+        assertEquals("the question isn't part of a plan", "Which is cheaper?", vm.uiState.value.question)
+
+        vm.swapPlans()
+        assertEquals(a, vm.uiState.value.planA.form)
+    }
+
+    @Test
+    fun `field errors follow their plan through a swap`() {
+        val vm = viewModel(ControlledRepository())
+        vm.updatePlan(PlanSlot.A) { PlanForm(name = "Only A valid", price = "199") }
+        vm.submit()
+        assertTrue(vm.uiState.value.planA.errors.isEmpty())
+        assertFalse(vm.uiState.value.planB.errors.isEmpty())
+
+        vm.swapPlans()
+        assertFalse(vm.uiState.value.planA.errors.isEmpty())
+        assertTrue(vm.uiState.value.planB.errors.isEmpty())
+    }
+
+    @Test
+    fun `swapped plans are sent in their new positions`() {
+        val repo = ControlledRepository()
+        val vm = viewModel(repo)
+        vm.fillValidForm()
+        vm.swapPlans()
+        vm.submit()
+        assertEquals("Stream Plus", repo.lastRequest?.planA?.name)
+        assertEquals("Stream Basic", repo.lastRequest?.planB?.name)
+    }
+
+    @Test
     fun `failed request keeps every input and shows the repository's error`() {
         val repo = ControlledRepository()
         val history = FakeHistory()

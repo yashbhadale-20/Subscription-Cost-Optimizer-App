@@ -68,6 +68,7 @@ import com.subscriptionoptimizer.app.ui.designsystem.components.LoadingButton
 import com.subscriptionoptimizer.app.ui.designsystem.components.SectionCard
 import com.subscriptionoptimizer.app.ui.designsystem.components.StatusPill
 import com.subscriptionoptimizer.app.ui.designsystem.components.Tone
+import com.subscriptionoptimizer.app.ui.designsystem.components.isTextTight
 import com.subscriptionoptimizer.app.ui.designsystem.theme.Spacing
 import com.subscriptionoptimizer.app.ui.designsystem.theme.SubscriptionOptimizerTheme
 
@@ -165,15 +166,15 @@ private fun BackendSection(
             onImeAction = onSave,
             enabled = state.loaded,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md), verticalAlignment = Alignment.CenterVertically) {
+        val saveButton: @Composable (Modifier) -> Unit = { modifier ->
             Button(
                 onClick = onSave,
                 enabled = state.hasUnsavedChanges,
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 52.dp),
+                modifier = modifier.heightIn(min = 52.dp),
                 shape = MaterialTheme.shapes.medium,
             ) { Text("Save") }
+        }
+        val testButton: @Composable (Modifier) -> Unit = { modifier ->
             LoadingButton(
                 text = "Test connection",
                 loadingText = "Testing…",
@@ -181,8 +182,19 @@ private fun BackendSection(
                 onClick = onTestConnection,
                 icon = Icons.Outlined.NetworkCheck,
                 enabled = state.loaded,
-                modifier = Modifier.weight(1.4f),
+                modifier = modifier,
             )
+        }
+        if (isTextTight()) {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                saveButton(Modifier.fillMaxWidth())
+                testButton(Modifier.fillMaxWidth())
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md), verticalAlignment = Alignment.CenterVertically) {
+                saveButton(Modifier.weight(1f))
+                testButton(Modifier.weight(1.4f))
+            }
         }
         state.savedMessage?.let {
             Text(

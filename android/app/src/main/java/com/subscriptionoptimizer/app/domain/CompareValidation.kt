@@ -42,10 +42,19 @@ object CompareValidation {
     const val MAX_TERMS = 500
     const val MAX_QUESTION = 1_000
 
+    /**
+     * Plain digits, or commas in thousands/lakh positions ("1,299.50", "1,00,000"). Anything else is
+     * refused: "499,50" from a comma-decimal keyboard must not become ₹49,950, and Kotlin's own
+     * parser would otherwise take "499f" and "1e5".
+     */
+    private val AMOUNT = Regex("""^(\d+|\d{1,3}(,\d{2,3})*,\d{3})?(\.\d*)?$""")
+
     /** Parses "1,299.50" or "₹ 499" into a finite number; null if not a number. */
     fun parseAmount(text: String): Double? =
-        text.replace(",", "").replace("₹", "").trim()
-            .toDoubleOrNull()
+        text.replace("₹", "").trim()
+            .takeIf(AMOUNT::matches)
+            ?.replace(",", "")
+            ?.toDoubleOrNull()
             ?.takeIf { it.isFinite() }
 
     fun validatePlan(form: PlanForm, otherPlanName: String? = null): Map<PlanField, String> {

@@ -1,0 +1,320 @@
+{
+  "current_monthly_total": 1246.0,
+  "current_annual_total": 14952.0,
+  "actions": [
+    {
+      "action_id": "cancel:spotify",
+      "subscription_id": "spotify",
+      "name": "Spotify",
+      "action": "cancel",
+      "reason": "Used once a month [Chunk 4].",
+      "monthly_savings": 119.0,
+      "annual_savings": 1428.0,
+      "policy_chunks": [
+        4
+      ]
+    },
+    {
+      "action_id": "switch_to_annual:google_one",
+      "subscription_id": "google_one",
+      "name": "Google One",
+      "action": "switch_to_annual",
+      "reason": "Paying Google One yearly (₹1300.00) instead of monthly (₹1560.00 a year) saves ₹260.00 a year, charged upfront.",
+      "monthly_savings": 21.67,
+      "annual_savings": 260.0,
+      "policy_chunks": [
+        1,
+        8
+      ]
+    },
+    {
+      "action_id": "downgrade:youtube",
+      "subscription_id": "youtube",
+      "name": "YouTube Premium",
+      "action": "downgrade",
+      "reason": "Moving YouTube Premium to Lite saves ₹60.00 a month. You would lose: Background play.",
+      "monthly_savings": 60.0,
+      "annual_savings": 720.0,
+      "policy_chunks": []
+    }
+  ],
+  "optimized_monthly_total": 1045.33,
+  "optimized_annual_total": 12544.0,
+  "total_monthly_savings": 200.67,
+  "total_annual_savings": 2408.0,
+  "percentage_savings": 16.1,
+  "budget": {
+    "target": 1500.0,
+    "achievable": true,
+    "met": true,
+    "gap": 0.0
+  },
+  "renewal_alerts": [
+    {
+      "subscription_id": "gym",
+      "name": "Gym App",
+      "kind": "intro_ending",
+      "renewal_date": "2026-11-14",
+      "days_until": 5,
+      "current_monthly": 50.0,
+      "after_monthly": 199.0,
+      "price_jump_monthly": 149.0,
+      "charge_amount": 199.0
+    }
+  ],
+  "ai_summary": "Cancel Spotify, pay Google One yearly and move YouTube to Lite to save ₹2408.00 a year. Yearly plans are charged upfront [Chunk 8].",
+  "policy_evidence": [
+    {
+      "chunk": 1,
+      "title": "Monthly and annual billing",
+      "text": "Monthly and annual billing\nA monthly subscription is billed each month.",
+      "source": "subscription_policy.txt",
+      "relevance": 0.41,
+      "matches_current_policy": false,
+      "cited": false
+    },
+    {
+      "chunk": 4,
+      "title": "Taxes and fees",
+      "text": "Taxes and fees\nTaxes and service fees can increase the amount paid beyond the advertised subscription price.",
+      "source": "subscription_policy.txt",
+      "relevance": 0.36,
+      "matches_current_policy": false,
+      "cited": true
+    },
+    {
+      "chunk": 8,
+      "title": "Cancellation and refunds",
+      "text": "Cancellation and refunds\nCancellation rules, refund eligibility, and early termination fees can affect the total cost.",
+      "source": "subscription_policy.txt",
+      "relevance": 0.52,
+      "matches_current_policy": false,
+      "cited": true
+    }
+  ],
+  "cited_chunks": [
+    4,
+    8
+  ],
+  "unsupported_citations": [],
+  "assumptions": [
+    "Prices are in INR and exclude taxes and fees.",
+    "Totals and savings use the price after any introductory offer ends.",
+    "Annual billing is charged upfront; refunds for annual plans may be limited.",
+    "Subscriptions marked must-keep are never cancelled or downgraded.",
+    "Each category keeps one service; overlap suggestions don't know which content you need."
+  ],
+  "missing_info": [
+    "No usage given for Google One, Gym App, so they can't be checked for being unused."
+  ],
+  "verification_passed": true,
+  "verification_notes": [],
+  "used_fallback": false,
+  "fallback_reason": null,
+  "guardrail_passed": true,
+  "trace_events": [
+    {
+      "step": 1,
+      "stage": "input_guardrail",
+      "kind": "check",
+      "name": "ta2_subscription_optimizer.guardrail",
+      "status": "passed",
+      "detail": "Looks okay.",
+      "duration_ms": 0.0,
+      "data": {}
+    },
+    {
+      "step": 2,
+      "stage": "profile_recall",
+      "kind": "function",
+      "name": "ta2_subscription_optimizer.recall",
+      "status": "ok",
+      "detail": "0 saved profile key(s).",
+      "duration_ms": 2.0,
+      "data": {
+        "keys": []
+      }
+    },
+    {
+      "step": 3,
+      "stage": "portfolio_recall",
+      "kind": "function",
+      "name": "db.get_portfolio",
+      "status": "ok",
+      "detail": "No saved portfolio.",
+      "duration_ms": 0.6,
+      "data": {}
+    },
+    {
+      "step": 4,
+      "stage": "candidate_actions",
+      "kind": "function",
+      "name": "optimizer_engine.build_candidates",
+      "status": "ok",
+      "detail": "5 subscription(s), ₹1246.00/month; 5 candidate action(s); 1 renewal alert(s); budget achievable.",
+      "duration_ms": 0.3,
+      "data": {
+        "actions": {
+          "cancel": 1,
+          "downgrade": 1,
+          "switch_to_annual": 1,
+          "review_before_renewal": 1,
+          "keep": 1
+        },
+        "budget_achievable": true
+      }
+    },
+    {
+      "step": 5,
+      "stage": "ollama_check",
+      "kind": "check",
+      "name": "ta2_subscription_optimizer.check_ollama",
+      "status": "passed",
+      "detail": "Ollama and models available.",
+      "duration_ms": 0.1,
+      "data": {}
+    },
+    {
+      "step": 6,
+      "stage": "policy_retrieval",
+      "kind": "retrieval",
+      "name": "Chroma.similarity_search_with_relevance_scores",
+      "status": "ok",
+      "detail": "3 chunk(s) at or above relevance 0.3 for 4 action type(s).",
+      "duration_ms": 1.2,
+      "data": {
+        "chunks": {
+          "cancel": [
+            4
+          ],
+          "switch_to_annual": [
+            8,
+            1
+          ],
+          "downgrade": [],
+          "review_before_renewal": []
+        }
+      }
+    },
+    {
+      "step": 7,
+      "stage": "agent",
+      "kind": "llm",
+      "name": "optimizer_agent (qwen2.5:3b)",
+      "status": "ok",
+      "detail": "Agent finished. The model made 2 tool call(s).",
+      "duration_ms": 4.8,
+      "data": {
+        "tool_calls": 2
+      }
+    },
+    {
+      "step": 8,
+      "stage": "agent",
+      "kind": "tool_call",
+      "name": "get_candidates",
+      "status": "ok",
+      "detail": "args: {}",
+      "duration_ms": null,
+      "data": {
+        "result": "[{\"action_id\":\"cancel:spotify\",\"action\":\"cancel\",\"subscription_id\":\"spotify\",\"monthly_savings\":119.0,\"annual_savings\":1428.0,\"reason\":\"Spotify is rarely used (used 1 time(s) a month); cancelling saves ₹119.00 a month.\"},{\"action_id\":\"downgrade:youtube\",\"action\":\"downgrade\",\"subscription_id\":\"youtube"
+      }
+    },
+    {
+      "step": 9,
+      "stage": "agent",
+      "kind": "tool_call",
+      "name": "search_policy",
+      "status": "ok",
+      "detail": "args: {'query': 'annual billing refunds'}",
+      "duration_ms": null,
+      "data": {
+        "result": "[Chunk 8] Cancellation and refunds\nCancellation rules, refund eligibility, and early termination fees can affect the total cost.\n\n[Chunk 1] Monthly and annual billing\nA monthly subscription is billed each month."
+      }
+    },
+    {
+      "step": 10,
+      "stage": "output_parse",
+      "kind": "validation",
+      "name": "parse_agent_output",
+      "status": "passed",
+      "detail": "Agent chose 3 action id(s).",
+      "duration_ms": null,
+      "data": {}
+    },
+    {
+      "step": 11,
+      "stage": "action_id_check",
+      "kind": "validation",
+      "name": "match_action_ids",
+      "status": "passed",
+      "detail": "Every id is a candidate. ",
+      "duration_ms": null,
+      "data": {
+        "dropped": [],
+        "rewritten": {}
+      }
+    },
+    {
+      "step": 12,
+      "stage": "engine_verification",
+      "kind": "validation",
+      "name": "optimizer_engine.verify",
+      "status": "passed",
+      "detail": "Every total re-adds from the per-subscription figures.",
+      "duration_ms": 0.1,
+      "data": {
+        "notes": []
+      }
+    },
+    {
+      "step": 13,
+      "stage": "figure_check",
+      "kind": "validation",
+      "name": "policy_rag.unmatched_amounts",
+      "status": "passed",
+      "detail": "Every rupee amount in the summary matches an engine figure.",
+      "duration_ms": null,
+      "data": {}
+    },
+    {
+      "step": 14,
+      "stage": "citation_check",
+      "kind": "validation",
+      "name": "policy_rag.check_citations",
+      "status": "passed",
+      "detail": "Cited retrieved chunk(s): [4, 8].",
+      "duration_ms": null,
+      "data": {
+        "cited": [
+          4,
+          8
+        ],
+        "unsupported": []
+      }
+    },
+    {
+      "step": 15,
+      "stage": "profile_update",
+      "kind": "persistence",
+      "name": "db.remember_profile",
+      "status": "ok",
+      "detail": "Saved currency and the optimized totals to the profile.",
+      "duration_ms": 5.8,
+      "data": {}
+    },
+    {
+      "step": 16,
+      "stage": "save_optimization",
+      "kind": "persistence",
+      "name": "db.save_optimization",
+      "status": "ok",
+      "detail": "Saved with this trace.",
+      "duration_ms": null,
+      "data": {}
+    }
+  ],
+  "optimization_id": "cc433884dbc8491fab17725c615860bb",
+  "created_at": "2026-11-09T17:04:08.294008+00:00",
+  "elapsed_seconds": 0.016
+}

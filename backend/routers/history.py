@@ -41,7 +41,8 @@ def _with_ids(item: dict[str, Any]) -> dict[str, Any]:
 @router.get("", response_model=HistoryListResponse, summary="The caller's saved comparisons")
 async def list_history(
     limit: int = Query(default=20, ge=1, le=50),
-    offset: int = Query(default=0, ge=0),
+    # Bounded: SQLite integers are 64-bit, so a larger OFFSET would be a 500.
+    offset: int = Query(default=0, ge=0, le=1_000_000),
     user_id: str = Depends(current_user),
 ) -> HistoryListResponse:
     items, total = await asyncio.to_thread(db.list_comparisons, user_id, limit, offset)

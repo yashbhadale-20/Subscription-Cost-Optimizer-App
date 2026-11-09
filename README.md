@@ -12,7 +12,7 @@ The **Subscription Cost Optimizer** is an autonomous multi-agent AI system desig
 
 ### Key Architectural Capabilities:
 - **Unit 3-1: RAG over Policy Corpus**
-  - Uses `ChromaDB` with `nomic-embed-text` vector embeddings to index and query rules from `data/subscription_policy.txt` (11 segmented chunks).
+  - Uses `ChromaDB` with `nomic-embed-text` vector embeddings to index and query rules from `data/subscription_policy.txt` (14 segmented chunks; 12–14 cover unused subscriptions, overlapping services and annual billing).
   - Grounded answer generation prevents hallucinations when policy information is absent or ambiguous.
 - **Unit 3-2: Short-Term Conversation Memory**
   - Implements `langgraph.checkpoint.memory.InMemorySaver` to maintain thread-isolated conversational history across multi-turn interactions.
@@ -336,13 +336,69 @@ Interactive API docs available at: `http://127.0.0.1:8000/docs`
 ## 9. Running Automated Tests
 
 ```powershell
-# 1. Deterministic comparison engine tests (57 tests, no LLM required)
+# 1. Full pytest suite (comparison + optimizer engines, API, persistence). No Ollama needed;
+#    the live RAG tests in tests/test_rag.py skip when Ollama is off.
+pip install -r requirements-dev.txt
+python -m pytest tests -q --ignore=tests/test_live_api.py
+
+# 2. Deterministic comparison engine tests (script style, no LLM required)
 python tests/test_comparison_engine.py
 
-# 2. Live API end-to-end integration test (requires Ollama and running server)
+# 3. Live API end-to-end integration test (requires Ollama and running server)
 python tests/test_live_api.py
 
-# 3. Base multi-agent supervisor verification
+# 4. Base multi-agent supervisor verification
 python verify_all.py
+
+# 5. Android unit tests (from android/, with Android Studio's JDK)
+$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
+.\gradlew.bat testDebugUnitTest
 ```
+
+---
+
+## 10. Subscription Optimization Agent
+
+Where `/compare` looks at two plans, the optimization agent looks at **every** subscription a user
+has and returns a plan: which to **keep**, **cancel**, **downgrade**, **switch to annual billing**,
+or **review before renewal**, with the monthly and annual savings, grounded in the policy RAG. It
+runs fully locally on Ollama `qwen2.5:3b`.
+
+- **Deterministic engine** (`backend/optimizer_engine.py`): finds unused subscriptions, overlapping
+  services in the same category, cheaper tiers, cheaper annual billing and renewals in the next 14
+  days, and turns them into candidate actions with their savings. Every rupee figure comes from here.
+- **Agent** (`backend/optimizer_agent.py`): a LangChain `create_agent` whose tools take subscription
+  and action **ids, never prices** (`list_subscriptions`, `get_candidates`, `estimate_plan`,
+  `check_budget`, `search_policy`). The 3B model only chooses and prioritises candidates and explains
+  them; it never does arithmetic.
+- **Supervisor checks**: unknown or conflicting action ids are dropped, all totals are re-added,
+  `[Chunk N]` citations and ₹ amounts in the summary are checked against retrieved chunks and engine
+  figures, and a summary with an invented amount is replaced by one built from engine numbers.
+- **Fallback**: if Ollama is down, slow or returns unusable output, the API still returns a valid
+  deterministic plan with `used_fallback: true`, and the trace says why.
+- **API**: `POST /optimize`, `GET /optimizations`, `GET/DELETE /optimizations/{id}`,
+  `GET /optimizations/{id}/trace`, `GET/PUT /portfolio`. See `backend/README.md`.
+- **Android**: an "Optimize my subscriptions" card on Home opens an editable subscription list
+  (prefilled from your saved portfolio), an optional budget and goal, and a results screen with the
+  savings, grouped actions, renewal alerts, policy evidence and the execution trace. Past runs appear
+  under History → Optimizations.
+
+### Try it (PowerShell)
+
+```powershell
+# After pulling this change: index the three new policy paragraphs (needs Ollama)
+python -m backend.reindex_policy
+
+# Demo without the server: prints the plan and its trace
+python optimize_demo.py
+python optimize_demo.py --budget 1200
+
+# Or through the API
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+On the first start after this change the backend migrates `subscription_memory.sqlite` to schema
+v2 (adds `optimizations` and `user_portfolio`), writing a backup to
+`subscription_memory.sqlite.pre-migration-v1.bak` first. `optimize_demo.py` applies the same
+migration.
 

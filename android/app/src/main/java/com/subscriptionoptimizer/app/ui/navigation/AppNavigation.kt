@@ -1,5 +1,6 @@
 package com.subscriptionoptimizer.app.ui.navigation
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -34,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -48,8 +50,13 @@ import com.subscriptionoptimizer.app.ui.assistant.AssistantRoute
 import com.subscriptionoptimizer.app.ui.policy.PolicyRoute
 import com.subscriptionoptimizer.app.ui.trace.TraceRoute
 import com.subscriptionoptimizer.app.ui.compare.CompareRoute
+import com.subscriptionoptimizer.app.ui.designsystem.components.isTextTight
 import com.subscriptionoptimizer.app.ui.history.HistoryRoute
 import com.subscriptionoptimizer.app.ui.home.HomeRoute
+import com.subscriptionoptimizer.app.ui.optimize.OptimizeResultRoute
+import com.subscriptionoptimizer.app.ui.optimize.OptimizeRoute
+import com.subscriptionoptimizer.app.ui.trace.TraceViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.subscriptionoptimizer.app.ui.results.ResultsRoute
 import com.subscriptionoptimizer.app.ui.settings.SettingsRoute
 
@@ -68,6 +75,14 @@ object Routes {
     fun trace(id: String) = "trace/$id"
 
     const val POLICY = "policy"
+
+    /** Not a tab: opened from the Home card. */
+    const val OPTIMIZE = "optimize"
+    const val OPTIMIZE_RESULT = "optimize_result/{$RESULT_ID_ARG}"
+    fun optimizeResult(id: String) = "optimize_result/$id"
+
+    const val OPTIMIZE_TRACE = "optimize_trace/{$RESULT_ID_ARG}"
+    fun optimizeTrace(id: String) = "optimize_trace/$id"
 }
 
 enum class TopLevelDestination(
@@ -102,6 +117,7 @@ fun AppNavigation(navController: NavHostController = rememberNavController()) {
     val currentDestination = backStackEntry?.destination
     val showNavigation = TopLevelDestination.entries.any { currentDestination.isOn(it) }
     val useRail = LocalConfiguration.current.screenWidthDp >= 600
+    val tightText = isTextTight()
 
     if (useRail) {
         Row(Modifier.fillMaxSize()) {
@@ -139,10 +155,13 @@ fun AppNavigation(navController: NavHostController = rememberNavController()) {
                                 icon = {
                                     Icon(
                                         if (selected) destination.selectedIcon else destination.unselectedIcon,
-                                        contentDescription = null,
+                                        // Hidden labels can't name the item, so the icon does.
+                                        contentDescription = if (tightText) destination.label else null,
                                     )
                                 },
-                                label = { Text(destination.label, maxLines = 1) },
+                                // Five labels don't fit here, and clipped ones ("Comp", "Setti") read
+                                // worse than icons, so the selected indicator marks the current tab.
+                                label = if (tightText) null else { { Text(destination.label, maxLines = 1) } },
                             )
                         }
                     }
@@ -161,7 +180,13 @@ fun AppNavigation(navController: NavHostController = rememberNavController()) {
 
 @Composable
 private fun AppNavHost(navController: NavHostController, modifier: Modifier = Modifier) {
-    val openResult: (String) -> Unit = { id -> navController.navigate(Routes.results(id)) }
+    val openResult: (String) -> Unit = { id ->
+        // launchSingleTop: a double tap on a history row opens one results screen, not two.
+        navController.navigate(Routes.results(id)) { launchSingleTop = true }
+    }
+    val openOptimization: (String) -> Unit = { id ->
+        navController.navigate(Routes.optimizeResult(id)) { launchSingleTop = true }
+    }
     NavHost(
         navController = navController,
         startDestination = Routes.HOME,
@@ -178,6 +203,7 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
                 onOpenHistory = { navController.navigateToTopLevel(TopLevelDestination.HISTORY) },
                 onOpenPolicy = { navController.navigate(Routes.POLICY) },
                 onOpenResult = openResult,
+                onOpenOptimize = { navController.navigate(Routes.OPTIMIZE) { launchSingleTop = true } },
             )
         }
         composable(Routes.COMPARE) {
@@ -190,6 +216,8 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
         composable(Routes.HISTORY) {
             HistoryRoute(
                 onOpenResult = openResult,
+                onOpenOptimization = openOptimization,
+                onNewOptimization = { navController.navigate(Routes.OPTIMIZE) { launchSingleTop = true } },
                 onNewComparison = { navController.navigateToTopLevel(TopLevelDestination.COMPARE) },
                 onOpenSettings = { navController.navigateToTopLevel(TopLevelDestination.SETTINGS) },
             )
@@ -206,7 +234,9 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
             },
         ) {
             ResultsRoute(
-                onBack = { navController.popBackStack() },
+                // dropUnlessResumed: a double tap on Back must not also pop the screen underneath,
+                // which would throw away a filled-in comparison form.
+                onBack = dropUnlessResumed { navController.popBackStack() },
                 onOpenTrace = { id -> navController.navigate(Routes.trace(id)) },
             )
         }
@@ -214,8 +244,46 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
             route = Routes.TRACE,
             arguments = listOf(navArgument(Routes.RESULT_ID_ARG) { type = NavType.StringType }),
         ) {
-            TraceRoute(onBack = { navController.popBackStack() })
+            TraceRoute(onBack = dropUnlessResumed { navController.popBackStack() })
         }
-        composable(Routes.POLICY) { PolicyRoute(onBack = { navController.popBackStack() }) }
+        composable(Routes.POLICY) { PolicyRoute(onBack = dropUnlessResumed { navController.popBackStack() }) }
+        composable(Routes.OPTIMIZE) {
+            OptimizeRoute(
+                onBack = dropUnlessResumed { navController.popBackStack() },
+                onResult = openOptimization,
+            )
+        }
+        composable(
+            route = Routes.OPTIMIZE_RESULT,
+            arguments = listOf(navArgument(Routes.RESULT_ID_ARG) { type = NavType.StringType }),
+            enterTransition = {
+                slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(260)) + fadeIn()
+            },
+            popExitTransition = {
+                slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(220)) + fadeOut()
+            },
+        ) {
+            OptimizeResultRoute(
+                onBack = dropUnlessResumed { navController.popBackStack() },
+                onOpenTrace = { id -> navController.navigate(Routes.optimizeTrace(id)) },
+            )
+        }
+        composable(
+            route = Routes.OPTIMIZE_TRACE,
+            arguments = listOf(navArgument(Routes.RESULT_ID_ARG) { type = NavType.StringType }),
+        ) {
+            TraceRoute(
+                onBack = dropUnlessResumed { navController.popBackStack() },
+                viewModel = viewModel(factory = TraceViewModel.OptimizationFactory),
+            )
+        }
     }
+
+    // System back on another tab goes Home the same way the Home tab does, saving that tab's state.
+    // Popping it instead discarded its ViewModel, losing a half-filled comparison or chat draft.
+    // Declared after NavHost so this callback is registered later and takes precedence over its own.
+    val destination = navController.currentBackStackEntryAsState().value?.destination
+    val onOtherTab = TopLevelDestination.entries.any { destination.isOn(it) } &&
+        !destination.isOn(TopLevelDestination.HOME)
+    BackHandler(enabled = onOtherTab) { navController.navigateToTopLevel(TopLevelDestination.HOME) }
 }

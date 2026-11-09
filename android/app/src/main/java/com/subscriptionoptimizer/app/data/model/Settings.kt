@@ -22,6 +22,11 @@ data class AppSettings(
 
         /** Address of the development host as seen from the Android emulator. */
         const val EMULATOR_BACKEND_URL = "http://10.0.2.2:8000"
+
+        /**
+         * Used before DataStore has loaded, and by installs that already hold a session under it.
+         * New installs get their own ID from [com.subscriptionoptimizer.app.domain.UserIds].
+         */
         const val DEFAULT_USER_ID = "android_user"
     }
 }

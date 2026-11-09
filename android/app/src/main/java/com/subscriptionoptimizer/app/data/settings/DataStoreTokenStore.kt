@@ -17,6 +17,10 @@ class DataStoreTokenStore(context: Context) : TokenStore {
 
     override suspend fun get(key: String): String? = dataStore.data.first()[stringPreferencesKey(key)]
 
+    /** Whether a session for [userId] exists on any backend. Keys are "<backend url>|<user id>". */
+    suspend fun hasSessionFor(userId: String): Boolean =
+        dataStore.data.first().asMap().keys.any { it.name.endsWith("|$userId") }
+
     override suspend fun put(key: String, token: String) {
         dataStore.edit { it[stringPreferencesKey(key)] = token }
     }

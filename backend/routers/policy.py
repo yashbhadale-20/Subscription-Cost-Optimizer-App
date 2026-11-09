@@ -1,6 +1,6 @@
 """
-GET  /policy/search?q=<query>&k=<1..10>  — raw similarity search
-POST /policy/ask                         — grounded answer with evidence and citation check
+GET  /policy/search?q=<query>&k=<1..10>  — raw similarity search (bearer token)
+POST /policy/ask                         — grounded answer with evidence and citation check (bearer token)
 GET  /policy/status                      — vector index vs. policy file (read-only)
 
 Performs a ChromaDB similarity search against the subscription_policy collection
@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend import policy_rag
 from backend.config import settings
-from backend.dependencies import get_store, require_ollama
+from backend.dependencies import current_user, get_store, in_model_thread, require_ollama
 from backend.models import PolicyAskRequest, PolicyAskResponse, PolicySearchResponse, PolicyStatusResponse
 from backend.tracing import TraceRecorder, model_tool_calls
 
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/policy", tags=["Policy"])
     "/search",
     response_model=PolicySearchResponse,
     summary="Semantic search over the subscription policy corpus",
-    dependencies=[Depends(require_ollama)],
+    dependencies=[Depends(current_user), Depends(require_ollama)],
 )
 async def policy_search(
     q: str = Query(..., min_length=1, max_length=500,
@@ -54,13 +54,12 @@ async def policy_search(
             },
         )
 
-    def _search() -> str:
-        return _app.retrieve_policy(store, q, k=k)
-
     try:
-        raw = await asyncio.wait_for(
-            asyncio.to_thread(_search),
-            timeout=30,
+        # The core module's retrieve_policy() turns exceptions into text, which would come back
+        # as a 200 "chunk" holding the error. No relevance floor: this is the raw search.
+        evidence = await asyncio.wait_for(
+            in_model_thread(policy_rag.retrieve_evidence, store, q, k, float("-inf")),
+            timeout=settings.retrieval_timeout_seconds,
         )
     except asyncio.TimeoutError:
         raise HTTPException(
@@ -71,13 +70,10 @@ async def policy_search(
         logger.error("Policy search error: %s", exc)
         raise HTTPException(
             status_code=502,
-            detail={"error": "Policy search failed", "message": str(exc)},
+            detail={"error": "Policy search failed", "message": "Retrieval failed. Check the server logs."},
         )
 
-    # Parse "[Chunk N] text\n\n[Chunk M] text" into a list
-    chunks: list[str] = [
-        seg.strip() for seg in raw.split("\n\n") if seg.strip()
-    ] if raw else []
+    chunks = [f"[Chunk {e.chunk}] {e.text}" for e in evidence]
 
     return PolicySearchResponse(
         query=q,
@@ -97,7 +93,8 @@ _NOT_IN_POLICY = (
     "/ask",
     response_model=PolicyAskResponse,
     summary="Answer a question from the policy corpus, with the evidence used",
-    dependencies=[Depends(require_ollama)],
+    # These run the local model, so they aren't open to anyone who can reach the port.
+    dependencies=[Depends(current_user), Depends(require_ollama)],
 )
 async def policy_ask(req: PolicyAskRequest, store: Any = Depends(get_store)) -> PolicyAskResponse:
     """
@@ -120,7 +117,8 @@ async def policy_ask(req: PolicyAskRequest, store: Any = Depends(get_store)) -> 
     try:
         with rec.timed() as t:
             evidence = await asyncio.wait_for(
-                asyncio.to_thread(policy_rag.retrieve_evidence, store, req.question, req.k), timeout=30,
+                in_model_thread(policy_rag.retrieve_evidence, store, req.question, req.k),
+                timeout=settings.retrieval_timeout_seconds,
             )
     except asyncio.TimeoutError:
         raise HTTPException(
@@ -128,7 +126,8 @@ async def policy_ask(req: PolicyAskRequest, store: Any = Depends(get_store)) -> 
         )
     except Exception as exc:
         logger.error("Policy retrieval error: %s", exc)
-        raise HTTPException(status_code=502, detail={"error": "Policy search failed", "message": str(exc)})
+        raise HTTPException(status_code=502, detail={
+            "error": "Policy search failed", "message": "Retrieval failed. Check the server logs."})
     rec.add(
         "policy_retrieval", "retrieval", retrieval_name, "ok",
         f"{len(evidence)} of top {req.k} chunk(s) at or above relevance {settings.policy_min_relevance}",
@@ -152,13 +151,16 @@ async def policy_ask(req: PolicyAskRequest, store: Any = Depends(get_store)) -> 
     )
 
     def _answer() -> tuple[str, list[dict[str, Any]]]:
-        result = _app.review_agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+        result = _app.review_agent.invoke(
+            {"messages": [{"role": "user", "content": prompt}]},
+            config={"recursion_limit": settings.agent_recursion_limit},
+        )
         return str(result["messages"][-1].content), model_tool_calls(result["messages"])
 
     try:
         with rec.timed() as t:
             raw, tool_calls = await asyncio.wait_for(
-                asyncio.to_thread(_answer), timeout=settings.llm_timeout_seconds,
+                in_model_thread(_answer), timeout=settings.llm_timeout_seconds,
             )
     except asyncio.TimeoutError:
         raise HTTPException(
@@ -167,7 +169,8 @@ async def policy_ask(req: PolicyAskRequest, store: Any = Depends(get_store)) -> 
         )
     except Exception as exc:
         logger.error("Policy answer error: %s", exc)
-        raise HTTPException(status_code=502, detail={"error": "Policy answer failed", "message": str(exc)})
+        raise HTTPException(status_code=502, detail={
+            "error": "Policy answer failed", "message": "The model returned an error. Check the server logs."})
 
     answer = policy_rag.strip_reasoning(raw)
     rec.add(

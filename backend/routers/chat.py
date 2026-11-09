@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 
 from backend import db, policy_rag
 from backend.config import settings
-from backend.dependencies import current_user, ensure_same_user, get_store, require_ollama
+from backend.dependencies import current_user, ensure_same_user, get_store, in_model_thread, require_ollama
 from backend.models import (
     ChatRequest,
     ChatResponse,
@@ -71,7 +71,7 @@ def _with_evidence(message: str, evidence: list[policy_rag.Evidence]) -> str:
     "/chat",
     response_model=ChatResponse,
     summary="Multi-turn conversational agent with policy evidence",
-    dependencies=[Depends(require_ollama)],
+    dependencies=[Depends(current_user), Depends(require_ollama)],
 )
 async def chat(
     req: ChatRequest,
@@ -79,15 +79,21 @@ async def chat(
     user_id: str = Depends(current_user),
 ) -> ChatResponse:
     ensure_same_user(user_id, req.user_id)
-    config = {"configurable": {"thread_id": _agent_thread(user_id, req.thread_id)}}
+    config = {
+        "configurable": {"thread_id": _agent_thread(user_id, req.thread_id)},
+        "recursion_limit": settings.agent_recursion_limit,
+    }
 
     evidence: list[policy_rag.Evidence] = []
     if store is not None:
         try:
-            evidence = await asyncio.to_thread(policy_rag.retrieve_evidence, store, req.message, 3)
-        except Exception as exc:
+            evidence = await asyncio.wait_for(
+                in_model_thread(policy_rag.retrieve_evidence, store, req.message, 3),
+                timeout=settings.retrieval_timeout_seconds,
+            )
+        except Exception as exc:  # including asyncio.TimeoutError
             # Chat still works without evidence; the response simply carries none.
-            logger.warning("Policy retrieval for chat failed: %s", exc)
+            logger.warning("Policy retrieval for chat failed: %r", exc)
 
     restored: list[dict[str, Any]] = []
     if not await asyncio.to_thread(_agent_has_state, config):
@@ -104,7 +110,7 @@ async def chat(
 
     try:
         reply = await asyncio.wait_for(
-            asyncio.to_thread(_invoke),
+            in_model_thread(_invoke),
             timeout=settings.llm_timeout_seconds,
         )
     except asyncio.TimeoutError:
@@ -119,7 +125,7 @@ async def chat(
         logger.error("Chat agent error for thread %s: %s", req.thread_id, exc)
         raise HTTPException(
             status_code=502,
-            detail={"error": "Chat agent failed", "message": str(exc)},
+            detail={"error": "Chat agent failed", "message": "The model returned an error. Check the server logs."},
         )
 
     reply = policy_rag.strip_reasoning(reply)

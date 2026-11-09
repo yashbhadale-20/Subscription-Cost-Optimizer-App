@@ -32,3 +32,12 @@ A cost comparison should not require passwords or payment-card details. This pro
 
 Limits of retrieved policy
 The RAG system can answer only when relevant information is present in its local corpus. If the corpus does not support a policy claim, the reviewer should say it does not know rather than invent a rule. General-knowledge questions unrelated to subscription policy, such as geography questions, are outside the scope of this policy corpus and should be identified as not answered by the retrieved policy.
+
+Unused subscriptions
+A subscription that is rarely or never used still costs its full price every billing period. If a service has been used only a few times in a month, or not at all for a month or more, cancelling it removes its whole cost from the monthly total. Check whether other people share the subscription before cancelling, and note any cancellation notice period in the provider's terms.
+
+Overlapping services in the same category
+Paying for several services that do the same job, such as two or more video streaming or music services, often duplicates cost. Keeping the one that is used most for its price and cancelling the others reduces spending, but each service may carry different content or features, so the user should confirm that nothing they need is only on a service they plan to cancel.
+
+Switching to annual billing
+Some monthly plans offer a yearly price that is lower than twelve monthly payments. Switching saves money only if the subscription is kept for the whole year. The yearly price is usually charged upfront in one payment, and refunds after cancelling an annual plan may be partial, prorated, or not available, depending on the provider's terms. Check the refund rules before switching.

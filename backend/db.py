@@ -99,6 +99,33 @@ MIGRATIONS: list[list[str]] = [
         """,
         "CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(user_id, thread_id, id)",
     ],
+    # v2 — subscription optimization runs and each user's saved subscription list
+    [
+        """
+        CREATE TABLE IF NOT EXISTS optimizations (
+            id                   TEXT PRIMARY KEY,
+            user_id              TEXT NOT NULL,
+            created_at           TEXT NOT NULL,
+            goal                 TEXT,
+            monthly_budget       REAL,
+            subscriptions_json   TEXT NOT NULL,
+            result_json          TEXT NOT NULL,
+            trace_json           TEXT NOT NULL,
+            total_annual_savings REAL NOT NULL,
+            used_fallback        INTEGER NOT NULL DEFAULT 0
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_optimizations_user_created ON optimizations(user_id, created_at DESC)",
+        """
+        CREATE TABLE IF NOT EXISTS user_portfolio (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id            TEXT NOT NULL UNIQUE,
+            subscriptions_json TEXT NOT NULL,
+            updated_at         TEXT NOT NULL
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_user_portfolio_user ON user_portfolio(user_id)",
+    ],
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)
@@ -195,6 +222,8 @@ def create_session(user_id: str, existing_token: str | None = None) -> str:
     token is stored; the token itself is returned once.
     """
     with connect() as conn:
+        # Take the write lock before checking, so two first-time claims can't both see "unclaimed".
+        conn.execute("BEGIN IMMEDIATE")
         claimed = conn.execute(
             "SELECT 1 FROM api_sessions WHERE user_id = ? LIMIT 1", (user_id,)
         ).fetchone()
@@ -225,6 +254,39 @@ def user_for_token(token: str) -> str | None:
             "UPDATE api_sessions SET last_used_at = ? WHERE token_hash = ?", (_utcnow(), _hash_token(token))
         )
         return row["user_id"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Long-term profile (the core module's user_memory table)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_REMEMBER = """
+    INSERT INTO user_memory(user_id, namespace, memory_key, memory_value) VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id, namespace, memory_key)
+    DO UPDATE SET memory_value = excluded.memory_value, updated_at = CURRENT_TIMESTAMP
+"""
+
+
+def remember(user_id: str, namespace: str, key: str, value: str) -> None:
+    """Like the core module's remember(), except that a failure raises instead of only printing."""
+    with connect() as conn:
+        conn.execute(_REMEMBER, (user_id, namespace, key, value))
+
+
+def remember_profile(user_id: str, values: dict[str, str]) -> None:
+    """Writes several profile keys in one transaction: all of them or none."""
+    with connect() as conn:
+        conn.executemany(_REMEMBER, [(user_id, "profile", k, v) for k, v in values.items()])
+
+
+def recall(user_id: str, namespace: str = "profile") -> dict[str, str]:
+    """Like the core module's recall(), except that a failure raises instead of returning {}."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT memory_key, memory_value FROM user_memory WHERE user_id = ? AND namespace = ? ORDER BY memory_key",
+            (user_id, namespace),
+        ).fetchall()
+    return {r["memory_key"]: r["memory_value"] for r in rows}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -304,6 +366,103 @@ def delete_all_comparisons(user_id: str) -> int:
     with connect() as conn:
         cur = conn.execute("DELETE FROM comparisons WHERE user_id = ?", (user_id,))
     return cur.rowcount
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Optimizations and the saved portfolio
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_optimization(
+    user_id: str,
+    goal: str | None,
+    monthly_budget: float | None,
+    subscriptions: list[dict[str, Any]],
+    result: dict[str, Any],
+    trace_events: list[dict[str, Any]],
+) -> tuple[str, str]:
+    optimization_id = uuid.uuid4().hex
+    created_at = _utcnow()
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO optimizations(id, user_id, created_at, goal, monthly_budget, subscriptions_json,
+                                      result_json, trace_json, total_annual_savings, used_fallback)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                optimization_id, user_id, created_at, goal, monthly_budget, json.dumps(subscriptions),
+                json.dumps(result), json.dumps(trace_events),
+                float(result.get("total_annual_savings", 0.0)), int(bool(result.get("used_fallback"))),
+            ),
+        )
+    return optimization_id, created_at
+
+
+def _optimization_row(row: sqlite3.Row, full: bool) -> dict[str, Any]:
+    subscriptions = json.loads(row["subscriptions_json"])
+    item: dict[str, Any] = {
+        "id": row["id"],
+        "created_at": row["created_at"],
+        "goal": row["goal"],
+        "monthly_budget": row["monthly_budget"],
+        "subscription_count": len(subscriptions),
+        "total_annual_savings": row["total_annual_savings"],
+        "used_fallback": bool(row["used_fallback"]),
+    }
+    if full:
+        item["subscriptions"] = subscriptions
+        item["result"] = json.loads(row["result_json"])
+        item["trace_events"] = json.loads(row["trace_json"])
+    return item
+
+
+def list_optimizations(user_id: str, limit: int, offset: int) -> tuple[list[dict[str, Any]], int]:
+    with connect() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM optimizations WHERE user_id = ?", (user_id,)).fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM optimizations WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (user_id, limit, offset),
+        ).fetchall()
+    return [_optimization_row(r, full=False) for r in rows], total
+
+
+def get_optimization(user_id: str, optimization_id: str) -> dict[str, Any] | None:
+    """Returns None both when the id doesn't exist and when another user owns it."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM optimizations WHERE id = ? AND user_id = ?", (optimization_id, user_id)
+        ).fetchone()
+    return _optimization_row(row, full=True) if row else None
+
+
+def delete_optimization(user_id: str, optimization_id: str) -> bool:
+    with connect() as conn:
+        cur = conn.execute("DELETE FROM optimizations WHERE id = ? AND user_id = ?", (optimization_id, user_id))
+    return cur.rowcount > 0
+
+
+def get_portfolio(user_id: str) -> dict[str, Any]:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT subscriptions_json, updated_at FROM user_portfolio WHERE user_id = ?", (user_id,)
+        ).fetchone()
+    if row is None:
+        return {"subscriptions": [], "updated_at": None}
+    return {"subscriptions": json.loads(row["subscriptions_json"]), "updated_at": row["updated_at"]}
+
+
+def save_portfolio(user_id: str, subscriptions: list[dict[str, Any]]) -> dict[str, Any]:
+    now = _utcnow()
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO user_portfolio(user_id, subscriptions_json, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET subscriptions_json = excluded.subscriptions_json,
+                                               updated_at = excluded.updated_at
+            """,
+            (user_id, json.dumps(subscriptions), now),
+        )
+    return {"subscriptions": subscriptions, "updated_at": now}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

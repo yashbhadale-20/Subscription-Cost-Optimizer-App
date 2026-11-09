@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from dataclasses import asdict
 from typing import Any
 
@@ -30,7 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from backend import db, policy_rag
 from backend.config import settings
-from backend.dependencies import current_user, ensure_same_user, get_store, require_ollama
+from backend.dependencies import in_model_thread, current_user, ensure_same_user, get_store, require_ollama
 from backend.models import (
     CompareRequest,
     CompareResponse,
@@ -204,7 +205,8 @@ def _save_trace_safe(trace_name: str, trace: list[str], answer: str) -> None:
     "",
     response_model=CompareResponse,
     summary="Compare two subscription plans with AI-powered analysis",
-    dependencies=[Depends(require_ollama)],
+    # Auth first: an anonymous caller shouldn't trigger an Ollama probe or learn its state.
+    dependencies=[Depends(current_user), Depends(require_ollama)],
 )
 async def compare(
     req: CompareRequest,
@@ -231,7 +233,8 @@ async def compare(
     # The user's saved default priority applies when the request doesn't name one.
     priority = req.priority
     if "priority" not in req.model_fields_set:
-        priority = db.get_preferences(user_id)["default_priority"] or priority
+        prefs = await asyncio.to_thread(db.get_preferences, user_id)
+        priority = prefs["default_priority"] or priority
 
     # ── 1. Pre-flight: guardrail (pure Python, no LLM) ─────────────────────
     with rec.timed() as t:
@@ -302,7 +305,10 @@ async def compare(
     else:
         try:
             with rec.timed() as t:
-                evidence = await asyncio.to_thread(policy_rag.retrieve_evidence, store, req.question, 3)
+                evidence = await asyncio.wait_for(
+                    in_model_thread(policy_rag.retrieve_evidence, store, req.question, 3),
+                    timeout=settings.retrieval_timeout_seconds,
+                )
             rec.add(
                 "policy_retrieval", "retrieval", retrieval_name, "ok",
                 f"{len(evidence)} chunk(s) at or above relevance {settings.policy_min_relevance}"
@@ -310,8 +316,14 @@ async def compare(
                 t["ms"],
                 {"chunks": [e.chunk for e in evidence], "relevance": [e.relevance for e in evidence]},
             )
+        except asyncio.TimeoutError:
+            rec.add("policy_retrieval", "retrieval", retrieval_name, "error",
+                    f"Timed out after {settings.retrieval_timeout_seconds}s; continuing without policy evidence.")
         except Exception as exc:
-            rec.add("policy_retrieval", "retrieval", retrieval_name, "error", f"{type(exc).__name__}: {exc}")
+            # Exception text can carry hosts, ports and paths: log it, and give the client only its type.
+            logger.warning("Policy retrieval for compare failed: %r", exc)
+            rec.add("policy_retrieval", "retrieval", retrieval_name, "error",
+                    f"{type(exc).__name__}; continuing without policy evidence.")
     policy_context = policy_rag.format_for_prompt(evidence)
 
     # ── 4. LLM explanation grounded in facts ───────────────────────────────
@@ -341,13 +353,14 @@ async def compare(
     try:
         def _explain() -> tuple[str, list[dict[str, Any]]]:
             result = _app.review_agent.invoke(
-                {"messages": [{"role": "user", "content": explain_prompt}]}
+                {"messages": [{"role": "user", "content": explain_prompt}]},
+                config={"recursion_limit": settings.agent_recursion_limit},
             )
             return str(result["messages"][-1].content), model_tool_calls(result["messages"])
 
         with rec.timed() as t:
             raw, tool_calls = await asyncio.wait_for(
-                asyncio.to_thread(_explain),
+                in_model_thread(_explain),
                 timeout=settings.llm_timeout_seconds,
             )
         ai_explanation = policy_rag.strip_reasoning(raw)
@@ -365,8 +378,9 @@ async def compare(
         ai_explanation = "(Explanation generation timed out. See calculated results above.)"
         rec.add("ai_explanation", "llm", agent_name, "error", f"Timed out after {settings.llm_timeout_seconds}s.")
     except Exception as exc:
-        ai_explanation = f"(Could not generate explanation: {exc})"
-        rec.add("ai_explanation", "llm", agent_name, "error", f"{type(exc).__name__}: {exc}")
+        logger.error("Explanation generation failed for %s: %s", user_id, exc)
+        ai_explanation = "(Could not generate explanation. See calculated results above.)"
+        rec.add("ai_explanation", "llm", agent_name, "error", f"{type(exc).__name__}; see server logs.")
 
     # ── 5. Validate the explanation ────────────────────────────────────────
     cited: list[int] = []
@@ -395,18 +409,21 @@ async def compare(
     # ── 6. Persist user profile to SQLite ──────────────────────────────────
     try:
         with rec.timed() as t:
-            _app.remember(user_id, "profile", "plan_a_name", req.plan_a.name)
-            _app.remember(user_id, "profile", "plan_b_name", req.plan_b.name)
-            _app.remember(user_id, "profile", "last_plan_a_monthly", f"{comparison.cost_a.monthly_equivalent:.2f}")
-            _app.remember(user_id, "profile", "last_plan_b_monthly", f"{comparison.cost_b.monthly_equivalent:.2f}")
-            _app.remember(user_id, "profile", "last_plan_a_discount", f"{comparison.cost_a.discount_percent:.2f}")
-            _app.remember(user_id, "profile", "last_plan_b_discount", f"{comparison.cost_b.discount_percent:.2f}")
-            _app.remember(user_id, "profile", "currency", "INR")
-            _app.remember(user_id, "profile", "last_priority", priority)
-        rec.add("profile_update", "persistence", "ta2_subscription_optimizer.remember", "ok",
+            await asyncio.to_thread(db.remember_profile, user_id, {
+                "plan_a_name": req.plan_a.name,
+                "plan_b_name": req.plan_b.name,
+                "last_plan_a_monthly": f"{comparison.cost_a.monthly_equivalent:.2f}",
+                "last_plan_b_monthly": f"{comparison.cost_b.monthly_equivalent:.2f}",
+                "last_plan_a_discount": f"{comparison.cost_a.discount_percent:.2f}",
+                "last_plan_b_discount": f"{comparison.cost_b.discount_percent:.2f}",
+                "currency": "INR",
+                "last_priority": priority,
+            })
+        rec.add("profile_update", "persistence", "db.remember_profile", "ok",
                 "Saved plan names, monthly equivalents, discounts and priority to the profile.", t["ms"])
     except Exception as exc:
-        rec.add("profile_update", "persistence", "ta2_subscription_optimizer.remember", "error", str(exc))
+        rec.add("profile_update", "persistence", "db.remember_profile", "error",
+                f"{type(exc).__name__}; see server logs.")
         logger.warning("Memory persist warning for user %s: %s", user_id, exc)
 
     # ── 7. Build the response, then save it with its trace ─────────────────
@@ -455,10 +472,11 @@ async def compare(
         response.created_at = created_at
     except Exception as exc:
         logger.error("Could not save comparison for %s: %s", user_id, exc)
-        save_event.update(status="error", detail=f"Not saved to history: {exc}")
+        save_event.update(status="error", detail=f"Not saved to history ({type(exc).__name__}).")
         response.trace_events = [TraceEvent(**e) for e in rec.events]
         response.trace = rec.as_lines()
 
-    trace_name = f"compare_{user_id}_{int(time.time())}.txt"
+    # The random suffix keeps two comparisons in the same second from overwriting each other.
+    trace_name = f"compare_{user_id}_{int(time.time())}_{uuid.uuid4().hex[:8]}.txt"
     await asyncio.to_thread(_save_trace_safe, trace_name, response.trace, ai_explanation)
     return response

@@ -7,6 +7,11 @@ import com.subscriptionoptimizer.app.data.model.CompareRequest
 import com.subscriptionoptimizer.app.data.model.ComparisonResult
 import com.subscriptionoptimizer.app.data.model.ConnectionTestResult
 import com.subscriptionoptimizer.app.data.model.ConversationSummary
+import com.subscriptionoptimizer.app.data.model.OptimizationSummary
+import com.subscriptionoptimizer.app.data.model.OptimizeRequest
+import com.subscriptionoptimizer.app.data.model.Portfolio
+import com.subscriptionoptimizer.app.data.model.SavedOptimization
+import com.subscriptionoptimizer.app.data.model.Subscription
 import com.subscriptionoptimizer.app.data.model.PolicyAnswer
 import com.subscriptionoptimizer.app.data.model.PolicyIndexStatus
 import com.subscriptionoptimizer.app.data.model.Priority
@@ -56,6 +61,24 @@ interface HistoryRepository {
 
     suspend fun delete(id: String): Result<Unit>
     suspend fun clear(): Result<Unit>
+}
+
+/**
+ * The subscription optimization agent (`POST /optimize`), its saved runs (`/optimizations`) and
+ * the user's saved subscription list (`/portfolio`).
+ */
+interface OptimizeRepository {
+    suspend fun optimize(request: OptimizeRequest): Result<SavedOptimization>
+
+    /** Newest first. */
+    suspend fun list(): Result<List<OptimizationSummary>>
+
+    /** From this session's cache when possible, otherwise `GET /optimizations/{id}`. */
+    suspend fun get(id: String): Result<SavedOptimization>
+    suspend fun trace(id: String): Result<List<TraceEvent>>
+    suspend fun delete(id: String): Result<Unit>
+    suspend fun portfolio(): Result<Portfolio>
+    suspend fun savePortfolio(subscriptions: List<Subscription>): Result<Portfolio>
 }
 
 /** `GET`/`PUT /preferences`. */

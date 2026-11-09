@@ -42,6 +42,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -77,6 +79,15 @@ fun AppTopBar(
         ),
     )
 }
+
+/**
+ * True when the screen is narrow for the current text size (below 320dp once font scale is taken
+ * into account), so anything laid out side by side should stack and tab labels won't fit.
+ * Width-based because 130% text is fine on a large phone and too wide on a 360dp one.
+ */
+@Composable
+fun isTextTight(): Boolean =
+    LocalConfiguration.current.screenWidthDp / LocalDensity.current.fontScale < 320f
 
 /** Centers content and caps its width so layouts stay readable on tablets and landscape. */
 @Composable

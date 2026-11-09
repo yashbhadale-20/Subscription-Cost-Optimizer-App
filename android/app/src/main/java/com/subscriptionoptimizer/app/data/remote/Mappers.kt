@@ -20,6 +20,7 @@ import com.subscriptionoptimizer.app.data.model.Priority
 import com.subscriptionoptimizer.app.data.model.Recommendation
 import com.subscriptionoptimizer.app.data.model.ScoreBreakdown
 import com.subscriptionoptimizer.app.data.repository.RepositoryError
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -213,7 +214,12 @@ fun parseTimestamp(value: String): Long? = try {
     null
 }
 
-private fun JsonElement.asText(): String = (this as? JsonPrimitive)?.contentOrNull ?: toString()
+/** Primitives as their content; lists inline ("7, 5, 2") or one sentence per line (missing_info); else JSON. */
+private fun JsonElement.asText(): String = when (this) {
+    is JsonPrimitive -> contentOrNull ?: toString()
+    is JsonArray -> map { it.asText() }.let { items -> items.joinToString(if (items.all { it.length <= 12 }) ", " else "\n") }
+    else -> toString()
+}
 
 private fun CostBreakdownDto.toDomain() = CostBreakdown(
     planName = planName,
